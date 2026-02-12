@@ -48,8 +48,8 @@ body {
 .auth-container {
     width: 90%;
     max-width: 450px;
-    padding: 40px;
-    background: var(--bg-secondary);
+    padding: 36px;
+    background: linear-gradient(180deg, rgba(20, 20, 20, 0.95) 0%, rgba(10, 10, 10, 0.85) 100%);
     border: 1px solid var(--border);
     border-radius: 16px;
     box-shadow: 0 20px 60px var(--shadow);
@@ -89,15 +89,19 @@ body {
 
 .auth-tabs {
     display: flex;
-    gap: 8px;
+    gap: 0;
     margin-bottom: 24px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 4px;
 }
 
 .auth-tab {
     flex: 1;
-    padding: 12px;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
+    padding: 12px 14px;
+    background: transparent;
+    border: none;
     color: var(--text-secondary);
     cursor: pointer;
     border-radius: 8px;
@@ -120,6 +124,29 @@ body {
     display: block;
 }
 
+/* Auth inputs should be full width (match button) */
+#auth-screen .form-group input,
+#auth-screen .form-group textarea,
+#auth-screen .form-group select {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    display: block;
+}
+
+#auth-screen .form-group {
+    margin-bottom: 18px;
+}
+
+#auth-screen .form-group label {
+    font-size: 12px;
+    letter-spacing: 0.2px;
+}
+
+#auth-screen .btn-primary {
+    margin-top: 6px;
+}
+
 .form-group {
     margin-bottom: 28px;
 }
@@ -134,11 +161,29 @@ body {
 
 .form-group input,
 .form-group textarea,
-.form-group select,
+.form-group select {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    display: block;
+    padding: 12px 20px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text-primary);
+    font-size: 15px;
+    transition: all 0.3s;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+}
+
+/* Compact selects (used in headers) */
 .select-input {
     width: auto;
-    min-width: 140px;
-    max-width: 200px;
+    min-width: 180px;
+    max-width: 320px;
+    display: inline-block;
     padding: 12px 20px;
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
