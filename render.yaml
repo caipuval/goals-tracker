@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: goals-tracker
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: DATABASE_TYPE
+        value: postgres
+      - key: DATABASE_SSL
+        value: "true"
+      # DATABASE_URL will be set manually in Render dashboard from your Supabase connection string

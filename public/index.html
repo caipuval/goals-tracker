@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Goals Tracker - Premium</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Login/Register Screen -->
+    <div id="auth-screen" class="screen active">
+        <div class="auth-container">
+            <div class="logo">
+                <div class="logo-icon">⚡</div>
+                <h1>GOALS TRACKER</h1>
+                <p class="tagline">Compete. Achieve. Excel.</p>
+            </div>
+            
+            <div class="auth-forms">
+                <div class="auth-tabs">
+                    <button class="auth-tab active" data-tab="login">Login</button>
+                    <button class="auth-tab" data-tab="register">Register</button>
+                </div>
+                
+                <form id="login-form" class="auth-form active">
+                    <div class="form-group">
+                        <label>Email or Username</label>
+                        <input type="text" id="login-username" required placeholder="your.email@example.com or username">
+                    </div>
+                    <div class="form-group">
+                        <label>Password</label>
+                        <input type="password" id="login-password" required>
+                    </div>
+                    <button type="submit" class="btn-primary">Login</button>
+                    <div id="login-error" class="error-message"></div>
+                </form>
+                
+                <form id="register-form" class="auth-form">
+                    <div class="form-group">
+                        <label>Email *</label>
+                        <input type="email" id="register-email" required placeholder="your.email@example.com">
+                    </div>
+                    <div class="form-group">
+                        <label>Username *</label>
+                        <input type="text" id="register-username" required placeholder="Choose a username">
+                    </div>
+                    <div class="form-group">
+                        <label>Password *</label>
+                        <input type="password" id="register-password" required placeholder="At least 6 characters" minlength="6">
+                    </div>
+                    <button type="submit" class="btn-primary">Create Account</button>
+                    <div id="register-error" class="error-message"></div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main App Screen -->
+    <div id="app-screen" class="screen">
+        <div class="app-header">
+            <div class="header-brand">
+                <span class="logo-icon-small">⚡</span>
+                <span>GOALS TRACKER</span>
+                <span class="header-username" id="username-display"></span>
+            </div>
+            <div class="header-clock">
+                <div id="live-clock"></div>
+            </div>
+        </div>
+
+        <div class="main-container">
+            <div class="sidebar">
+                <button class="nav-item active" data-view="calendar">
+                    <span class="icon">📅</span>
+                    <span>Calendar</span>
+                </button>
+                <button class="nav-item" data-view="goals">
+                    <span class="icon">🎯</span>
+                    <span>My Goals</span>
+                </button>
+                <button class="nav-item" data-view="statistics">
+                    <span class="icon">📊</span>
+                    <span>Statistics</span>
+                </button>
+                <button class="nav-item" data-view="leaderboard">
+                    <span class="icon">🏆</span>
+                    <span>Leaderboard</span>
+                </button>
+                <button class="nav-item" data-view="competition">
+                    <span class="icon">⚔️</span>
+                    <span>Competition</span>
+                </button>
+                <div class="sidebar-actions">
+                    <button id="new-goal-btn" class="btn-primary btn-block">
+                        <span>+ New Goal</span>
+                    </button>
+                    <button id="logout-btn" class="btn-secondary btn-block">Logout</button>
+                </div>
+            </div>
+
+            <div class="content">
+                <!-- Calendar View -->
+                <div id="calendar-view" class="view active">
+                    <div class="view-header">
+                        <h2>Calendar</h2>
+                        <div class="calendar-controls">
+                            <button id="prev-month" class="btn-icon">‹</button>
+                            <span id="current-month"></span>
+                            <button id="next-month" class="btn-icon">›</button>
+                        </div>
+                    </div>
+                    
+                    <div id="calendar"></div>
+                    
+                    <div id="day-details" class="day-details" style="display: none;">
+                        <div class="day-details-header">
+                            <h3 id="selected-date"></h3>
+                            <button id="close-details" class="btn-icon">✕</button>
+                        </div>
+                        <div id="day-goals-list"></div>
+                    </div>
+                </div>
+
+                <!-- Goals View -->
+                <div id="goals-view" class="view">
+                    <div class="view-header">
+                        <h2>My Goals</h2>
+                        <select id="goals-period" class="select-input">
+                            <option value="all">All Time</option>
+                            <option value="today" selected>Today</option>
+                            <option value="yesterday">Yesterday</option>
+                            <option value="week">This Week</option>
+                            <option value="month">This Month</option>
+                            <option value="3months">3 Months</option>
+                            <option value="year">This Year</option>
+                        </select>
+                    </div>
+                    <div id="goals-list"></div>
+                </div>
+
+                <!-- Statistics View -->
+                <div id="statistics-view" class="view">
+                    <div class="view-header">
+                        <h2>Statistics</h2>
+                        <select id="statistics-period" class="select-input">
+                            <option value="today" selected>Today</option>
+                            <option value="yesterday">Yesterday</option>
+                            <option value="week">This Week</option>
+                            <option value="month">This Month</option>
+                            <option value="3months">3 Months</option>
+                            <option value="year">This Year</option>
+                        </select>
+                    </div>
+                    <div id="statistics-content">
+                        <div class="stats-overview">
+                            <div class="stat-card">
+                                <div class="stat-label">Total Time</div>
+                                <div class="stat-value" id="total-time-stat">0h</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-label">Goals Completed</div>
+                                <div class="stat-value" id="goals-completed-stat">0</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-label">Active Goals</div>
+                                <div class="stat-value" id="active-goals-stat">0</div>
+                            </div>
+                        </div>
+                        <div class="stats-breakdown">
+                            <h3>Time by Activity</h3>
+                            <div id="activity-stats"></div>
+                            <div class="activity-chart-container">
+                                <canvas id="activity-chart"></canvas>
+                            </div>
+                        </div>
+                        <div class="stats-chart">
+                            <h3>Time Progress Over Time</h3>
+                            <canvas id="time-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Leaderboard View -->
+                <div id="leaderboard-view" class="view">
+                    <div class="view-header">
+                        <h2>Leaderboard</h2>
+                        <select id="leaderboard-period" class="select-input">
+                            <option value="today">Today</option>
+                            <option value="yesterday">Yesterday</option>
+                            <option value="week" selected>This Week</option>
+                            <option value="month">This Month</option>
+                            <option value="3months">3 Months</option>
+                            <option value="year">This Year</option>
+                        </select>
+                    </div>
+                    <div id="leaderboard-list"></div>
+                </div>
+
+                <!-- Competition View -->
+                <div id="competition-view" class="view">
+                    <div class="view-header">
+                        <h2>Competition</h2>
+                        <button id="create-competition-btn" class="btn-primary">+ Create Competition</button>
+                    </div>
+                    <div id="competition-content">
+                        <div id="no-competition" class="empty-state">
+                            <div class="empty-icon">⚔️</div>
+                            <h3>No Active Competition</h3>
+                            <p>Create a competition goal and challenge your friends!</p>
+                        </div>
+                        <div id="competition-details" style="display: none;">
+                            <div class="competition-header">
+                                <h3 id="competition-title"></h3>
+                                <p id="competition-description"></p>
+                            </div>
+                            <div class="competition-stats">
+                                <div class="stat-card">
+                                    <div class="stat-label">Your Time</div>
+                                    <div class="stat-value" id="my-competition-time">0m</div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-label">Rank</div>
+                                    <div class="stat-value" id="my-competition-rank">-</div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-label">Total Time</div>
+                                    <div class="stat-value" id="competition-total-time">0m</div>
+                                </div>
+                            </div>
+                            <div class="competition-actions" style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+                                <button id="join-competition-btn" class="btn-primary" style="display: none;">Join Competition</button>
+                                <button id="invite-competition-btn" class="btn-primary" style="background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--accent);">Invite</button>
+                                <button id="add-competition-time-btn" class="btn-primary">Add Time</button>
+                                <button id="remove-competition-time-btn" class="btn-primary" style="background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--accent);">Remove Time</button>
+                            </div>
+                            <div class="competition-leaderboard">
+                                <h4>Competition Leaderboard</h4>
+                                <div id="competition-leaderboard-list"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Goal Modal -->
+    <div id="goal-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Create New Goal</h2>
+                <button class="btn-icon" id="close-modal">✕</button>
+            </div>
+            <form id="goal-form">
+                <div class="form-group">
+                    <label>Goal Title *</label>
+                    <input type="text" id="goal-title" required placeholder="e.g., Reading">
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea id="goal-description" placeholder="Optional details about your goal"></textarea>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Type *</label>
+                        <select id="goal-type" required>
+                            <option value="one-time">One-Time (Single Day)</option>
+                            <option value="daily">Daily</option>
+                            <option value="weekly">Weekly</option>
+                            <option value="monthly">Monthly</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Duration (Optional)</label>
+                        <div class="duration-input-group">
+                            <div class="time-unit-toggle">
+                                <button type="button" class="time-unit-btn active" data-unit="minutes">Minutes</button>
+                                <button type="button" class="time-unit-btn" data-unit="hours">Hours</button>
+                            </div>
+                            <input type="number" id="goal-duration" min="0" step="0.1" placeholder="Leave empty for no time">
+                        </div>
+                        <small class="form-hint">Leave empty to log time after completion</small>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Start Date *</label>
+                    <input type="date" id="goal-start-date" required>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-secondary" id="cancel-goal">Cancel</button>
+                    <button type="submit" class="btn-primary">Create Goal</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Complete Goal Modal -->
+    <div id="complete-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Log Completion</h2>
+                <button class="btn-icon" id="close-complete-modal">✕</button>
+            </div>
+            <form id="complete-form">
+                <div class="form-group">
+                    <label id="complete-goal-title"></label>
+                    <div class="form-hint" id="complete-goal-info"></div>
+                </div>
+                <div class="form-group" id="time-spent-group">
+                    <label>Time Spent (Optional)</label>
+                    <div class="duration-input-group">
+                        <div class="time-unit-toggle">
+                            <button type="button" class="time-unit-btn active" data-unit="minutes" id="complete-unit-minutes">Minutes</button>
+                            <button type="button" class="time-unit-btn" data-unit="hours" id="complete-unit-hours">Hours</button>
+                        </div>
+                        <input type="number" id="complete-duration" min="0" step="0.1" placeholder="Leave empty for no time">
+                    </div>
+                    <small class="form-hint" id="time-hint">Leave empty and click "Done" to complete without logging time</small>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-secondary" id="cancel-complete">Cancel</button>
+                    <button type="submit" class="btn-primary" id="complete-submit-btn">Log Time</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Create Competition Modal -->
+    <div id="competition-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Create Competition</h2>
+                <button class="btn-icon" id="close-competition-modal">✕</button>
+            </div>
+            <form id="competition-form">
+                <div class="form-group">
+                    <label>Competition Goal Title *</label>
+                    <input type="text" id="competition-title-input" required placeholder="e.g., Daily Reading">
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea id="competition-description-input" placeholder="What are you competing on?"></textarea>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-secondary" id="cancel-competition">Cancel</button>
+                    <button type="submit" class="btn-primary">Create Competition</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Log Competition Time Modal -->
+    <div id="log-competition-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Log Competition Time</h2>
+                <button class="btn-icon" id="close-log-competition-modal">✕</button>
+            </div>
+            <form id="log-competition-form">
+                <div class="form-group">
+                    <label>Time Spent *</label>
+                    <div class="duration-input-group">
+                        <div class="time-unit-toggle">
+                            <button type="button" class="time-unit-btn active" data-unit="minutes" id="competition-unit-minutes">Minutes</button>
+                            <button type="button" class="time-unit-btn" data-unit="hours" id="competition-unit-hours">Hours</button>
+                        </div>
+                        <input type="number" id="competition-duration" min="0" step="0.1" required placeholder="Enter time">
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-secondary" id="cancel-log-competition">Cancel</button>
+                    <button type="submit" class="btn-primary">Log Time</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Invite to Competition Modal -->
+    <div id="invite-competition-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Invite to Competition</h2>
+                <button class="btn-icon" id="close-invite-modal">✕</button>
+            </div>
+            <form id="invite-competition-form">
+                <div class="form-group">
+                    <label>Username *</label>
+                    <input type="text" id="invite-username" required placeholder="Enter username to invite">
+                    <small class="form-hint">Enter the username of the person you want to invite</small>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-secondary" id="cancel-invite">Cancel</button>
+                    <button type="submit" class="btn-primary">Send Invite</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Participant Details Modal -->
+    <div id="participant-details-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="participant-details-name">Participant Details</h2>
+                <button class="btn-icon" id="close-participant-modal">✕</button>
+            </div>
+            <div id="participant-details-content">
+                <div class="participant-summary">
+                    <div class="stat-card">
+                        <div class="stat-label">Total Time</div>
+                        <div class="stat-value" id="participant-total-time">0m</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Days Active</div>
+                        <div class="stat-value" id="participant-days-active">0</div>
+                    </div>
+                </div>
+                <div class="participant-daily-breakdown">
+                    <h3>Daily Breakdown</h3>
+                    <div id="participant-daily-list"></div>
+                </div>
+                <div class="participant-time-breakdown" id="participant-time-breakdown-container">
+                    <h3>Time Breakdown</h3>
+                    <div id="participant-time-breakdown-content"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js?v=25"></script>
+</body>
+</html>
