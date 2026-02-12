@@ -22,8 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }, 30000); // Check every 30 seconds
     
-    // Set default date for goal creation
-    document.getElementById('goal-start-date').valueAsDate = new Date();
+    // Default goal date is set when opening the modal (based on selected calendar date)
 });
 
 // Auth Functions
@@ -173,13 +172,12 @@ function setupEventListeners() {
 
     document.getElementById('close-details').addEventListener('click', () => {
         document.getElementById('day-details').style.display = 'none';
-        selectedDate = null;
-        renderCalendar();
+        // Keep the selected date highlighted; just hide the details panel.
     });
 
     // Goal modal
     document.getElementById('new-goal-btn').addEventListener('click', () => {
-        document.getElementById('goal-modal').classList.add('active');
+        openGoalModal();
     });
 
     document.getElementById('close-modal').addEventListener('click', closeModal);
@@ -412,6 +410,24 @@ function setupEventListeners() {
     }
 }
 
+function getEffectiveSelectedDate() {
+    // Prefer the explicitly selected calendar date; fall back to "context" date; then real today.
+    const base = selectedDate || contextDate || new Date();
+    const d = new Date(base);
+    d.setHours(0, 0, 0, 0);
+    return d;
+}
+
+function openGoalModal() {
+    // Default the goal date to the selected calendar day (supports future dates).
+    const goalDate = getEffectiveSelectedDate();
+    const goalStartInput = document.getElementById('goal-start-date');
+    if (goalStartInput) {
+        goalStartInput.value = formatDate(goalDate);
+    }
+    document.getElementById('goal-modal').classList.add('active');
+}
+
 function showError(elementId, message) {
     const errorElement = document.getElementById(elementId);
     errorElement.textContent = message;
@@ -455,7 +471,8 @@ function renderCalendar() {
         currentMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
     
     // Day headers
-    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    // Europe-friendly week: Monday → Sunday
+    const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     dayNames.forEach(day => {
         const header = document.createElement('div');
         header.className = 'calendar-day-header';
@@ -466,7 +483,8 @@ function renderCalendar() {
     // Get first day of month
     const firstDay = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
     const lastDay = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
-    const startDay = firstDay.getDay();
+    // JS getDay(): Sun=0..Sat=6. Convert so Mon=0..Sun=6.
+    const startDay = (firstDay.getDay() + 6) % 7;
     
     // Previous month days
     const prevMonthLastDay = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 0).getDate();
@@ -1577,7 +1595,7 @@ function renderLeaderboard(leaderboard) {
 function closeModal() {
     document.getElementById('goal-modal').classList.remove('active');
     document.getElementById('goal-form').reset();
-    document.getElementById('goal-start-date').valueAsDate = new Date();
+    // Goal start date is set when opening the modal.
 }
 
 function formatDate(date) {
