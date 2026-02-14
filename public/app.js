@@ -9,6 +9,7 @@ let selectedDate = null;
 let contextDate = null; // The date selected in calendar that acts as "today" for other views
 let allGoals = [];
 let currentFilter = 'all';
+let selectedFriendId = null;
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
@@ -157,6 +158,17 @@ function setupEventListeners() {
             const view = item.dataset.view;
             switchView(view);
         });
+    });
+
+    // Friends
+    document.getElementById('add-friend-btn')?.addEventListener('click', async () => {
+        await sendFriendRequestFromUI();
+    });
+    document.getElementById('add-friend-username')?.addEventListener('keydown', async (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            await sendFriendRequestFromUI();
+        }
     });
 
     // Calendar controls
@@ -315,11 +327,13 @@ function setupEventListeners() {
     const cancelCompetition = document.getElementById('cancel-competition');
     const competitionForm = document.getElementById('competition-form');
     
-    if (createCompetitionBtn) {
-        createCompetitionBtn.addEventListener('click', () => {
-            if (competitionModal) competitionModal.classList.add('active');
-        });
-    }
+    document.addEventListener('click', (e) => {
+        if (e.target.closest('#create-competition-btn')) {
+            e.preventDefault();
+            const modal = document.getElementById('competition-modal');
+            if (modal) modal.classList.add('active');
+        }
+    });
     if (closeCompetitionModal) {
         closeCompetitionModal.addEventListener('click', () => {
             if (competitionModal) competitionModal.classList.remove('active');
@@ -336,6 +350,20 @@ function setupEventListeners() {
             await createCompetition();
         });
     }
+
+    const editCompetitionModal = document.getElementById('edit-competition-modal');
+    const closeEditCompetitionModal = document.getElementById('close-edit-competition-modal');
+    const cancelEditCompetition = document.getElementById('cancel-edit-competition');
+    document.getElementById('edit-competition-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await saveEditCompetition();
+    });
+    if (closeEditCompetitionModal) closeEditCompetitionModal.addEventListener('click', () => editCompetitionModal?.classList.remove('active'));
+    if (cancelEditCompetition) cancelEditCompetition.addEventListener('click', () => editCompetitionModal?.classList.remove('active'));
+
+    // Leave/Delete competition
+    document.getElementById('leave-competition-btn')?.addEventListener('click', leaveCompetition);
+    document.getElementById('delete-competition-btn')?.addEventListener('click', deleteCompetition);
     // Invite to competition
     document.getElementById('invite-competition-btn')?.addEventListener('click', () => {
         if (!currentCompetition) {
@@ -410,6 +438,58 @@ function setupEventListeners() {
     }
 }
 
+async function leaveCompetition() {
+    try {
+        if (!currentCompetition?.id) return;
+        if (!currentUser?.id) return;
+        if (!confirm('Leave this competition? Your competition time logs will be removed from this competition.')) return;
+
+        const response = await fetch(`${API_URL}/api/competition/leave`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: currentUser.id, competitionId: currentCompetition.id })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            showErrorModal('Unable to Leave', data.error || 'Failed to leave competition.');
+            return;
+        }
+        showSuccessModal('Left Competition', 'You have left the competition successfully.');
+        currentCompetition = null;
+        await loadCompetitionsList();
+        document.getElementById('competition-detail').style.display = 'none';
+    } catch (e) {
+        console.error('leaveCompetition error', e);
+        showErrorModal('Error', 'Failed to leave competition.');
+    }
+}
+
+async function deleteCompetition() {
+    try {
+        if (!currentCompetition?.id) return;
+        if (!currentUser?.id) return;
+        if (!confirm('Delete this competition? This cannot be undone.')) return;
+
+        const response = await fetch(`${API_URL}/api/competition/${currentCompetition.id}`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: currentUser.id })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            showErrorModal('Unable to Delete', data.error || 'Failed to delete competition.');
+            return;
+        }
+        showSuccessModal('Competition Deleted', 'The competition has been deleted.');
+        currentCompetition = null;
+        await loadCompetitionsList();
+        document.getElementById('competition-detail').style.display = 'none';
+    } catch (e) {
+        console.error('deleteCompetition error', e);
+        showErrorModal('Error', 'Failed to delete competition.');
+    }
+}
+
 function getEffectiveSelectedDate() {
     // Prefer the explicitly selected calendar date; fall back to "context" date; then real today.
     const base = selectedDate || contextDate || new Date();
@@ -457,7 +537,9 @@ function switchView(view) {
     } else if (view === 'statistics') {
         loadStatistics();
     } else if (view === 'competition') {
-        loadCompetition();
+        loadCompetitionsList();
+    } else if (view === 'friends') {
+        loadFriendsData();
     }
 }
 
@@ -1243,7 +1325,15 @@ function renderGoalsList() {
     const periodText = period !== 'all' ? document.getElementById('goals-period').selectedOptions[0].text : 'All Time';
     const counterHTML = `
         <div class="self-improvement-counter">
-            <div class="counter-icon">⚡</div>
+            <div class="counter-icon" aria-hidden="true">
+                <img
+                    class="counter-icon-img"
+                    src="/Images/GT_Logo_2.png?v=1"
+                    alt="Goals Tracker logo"
+                    onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-block';"
+                />
+                <span class="counter-icon-fallback" style="display:none">⚡</span>
+            </div>
             <div class="counter-content">
                 <div class="counter-label">Self Improvement</div>
                 <div class="counter-time">${formatTime(totalTimeLogged)}</div>
@@ -1504,6 +1594,7 @@ async function submitCompletion() {
             if (selectedDate) {
                 showDayDetails(selectedDate);
             }
+            await loadCompetition();
         }
     } catch (error) {
         console.error('Error completing goal:', error);
@@ -1763,11 +1854,12 @@ function renderActivityStats(activityStats) {
         });
     
     if (activities.length === 0) {
+        container.classList.add('is-empty');
         container.innerHTML = `
-            <div class="empty-state">
-                <div class="empty-state-icon">📊</div>
-                <h3>No activity yet</h3>
-                <p>Complete some goals to see your statistics!</p>
+            <div class="time-by-activity-empty">
+                <span class="time-by-activity-empty__icon" aria-hidden="true">📈</span>
+                <p class="time-by-activity-empty__title">No activity yet</p>
+                <p class="time-by-activity-empty__subtitle">Complete some goals to see your statistics!</p>
             </div>
         `;
         // Clear chart and legend
@@ -1796,6 +1888,7 @@ function renderActivityStats(activityStats) {
         return bNum - aNum; // Highest first, lowest last
     });
     
+    container.classList.remove('is-empty');
     activities.forEach(([activity, minutes]) => {
         const minutesNum = typeof minutes === 'number' ? minutes : Number(minutes) || 0;
         const card = document.createElement('div');
@@ -2057,45 +2150,97 @@ function drawChart(labels, values) {
 // Competition Functions
 let currentCompetition = null;
 
-async function loadCompetition() {
+function showCompetitionEmptyState() {
+    const contentEl = document.getElementById('competition-content');
+    const noEl = document.getElementById('no-competition');
+    const listEl = document.getElementById('competition-list');
+    const detailEl = document.getElementById('competition-detail');
+    if (contentEl) contentEl.classList.add('competition-empty');
+    if (noEl) noEl.style.display = 'block';
+    if (listEl) listEl.style.display = 'none';
+    if (detailEl) detailEl.style.display = 'none';
+    currentCompetition = null;
+}
+
+async function loadCompetitionsList() {
+    const noEl = document.getElementById('no-competition');
+    const listEl = document.getElementById('competition-list');
+    const detailEl = document.getElementById('competition-detail');
     try {
-        // Add cache busting to ensure fresh data
-        const response = await fetch(`${API_URL}/api/competition?userId=${currentUser.id}&_=${Date.now()}`);
+        if (!currentUser || !currentUser.id) {
+            showCompetitionEmptyState();
+            return;
+        }
+        const response = await fetch(`${API_URL}/api/competitions?userId=${currentUser.id}&_=${Date.now()}`);
         const data = await response.json();
-        console.log('loadCompetition - received data:', data);
-        
+        const list = data.competitions || [];
+        document.getElementById('competition-content')?.classList.remove('competition-empty');
+        noEl.style.display = 'none';
+        listEl.style.display = 'none';
+        detailEl.style.display = 'none';
+        if (list.length === 0) {
+            showCompetitionEmptyState();
+            return;
+        }
+        listEl.style.display = 'grid';
+        listEl.innerHTML = list.map(c => `
+            <div class="competition-box-wrap" data-competition-id="${c.id}">
+                <button type="button" class="competition-box" aria-label="Open ${escapeHtml(c.title)}">
+                    <span class="competition-box__title">${escapeHtml(c.title)}</span>
+                    ${c.description ? `<span class="competition-box__desc">${escapeHtml(c.description)}</span>` : ''}
+                    <span class="competition-box__meta">${c.participantCount} participant${c.participantCount !== 1 ? 's' : ''} · ${formatTime(c.totalTime)} total</span>
+                    ${c.isCreator ? '<span class="competition-box__badge">Owner</span>' : ''}
+                </button>
+                ${c.isCreator ? `<button type="button" class="competition-box-edit" aria-label="Edit competition" title="Edit">✎</button>` : ''}
+            </div>
+        `).join('');
+        listEl.querySelectorAll('.competition-box-wrap').forEach(wrap => {
+            const id = parseInt(wrap.dataset.competitionId);
+            wrap.querySelector('.competition-box')?.addEventListener('click', () => selectCompetition(id));
+            wrap.querySelector('.competition-box-edit')?.addEventListener('click', (e) => { e.stopPropagation(); openEditCompetitionModal(id); });
+        });
+        checkPendingInvitations();
+    } catch (error) {
+        console.error('Error loading competitions list:', error);
+        showCompetitionEmptyState();
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function selectCompetition(id) {
+    currentCompetition = { id };
+    loadCompetitionById(id);
+}
+
+async function loadCompetitionById(competitionId) {
+    try {
+        const response = await fetch(`${API_URL}/api/competition/${competitionId}?userId=${currentUser.id}&_=${Date.now()}`);
+        const data = await response.json();
         if (!data.competition) {
-            // No competition exists
-            document.getElementById('no-competition').style.display = 'block';
-            document.getElementById('competition-details').style.display = 'none';
+            document.getElementById('competition-detail').style.display = 'none';
             currentCompetition = null;
             return;
         }
-        
         currentCompetition = data.competition;
-        document.getElementById('no-competition').style.display = 'none';
-        document.getElementById('competition-details').style.display = 'block';
-        
-        // Update competition info
+        const detailEl = document.getElementById('competition-detail');
+        detailEl.style.display = 'block';
         document.getElementById('competition-title').textContent = data.competition.title;
         document.getElementById('competition-description').textContent = data.competition.description || '';
-        
-        // REBUILT: "YOUR TIME" shows BOTH goal time AND manually added competition time
-        const goalTimeMins = Number(data.userStats?.goalCompletionMinutes || 0);
-        const manualTimeMins = Number(data.userStats?.totalMinutes || 0) - goalTimeMins;
-        const userTotalMins = Number(data.userStats?.totalMinutes || 0); // Total = goals + manual
-        
-        // Update "YOUR TIME" display - shows TOTAL (goals + manual competition time)
+        const userTotalMins = Number(data.userStats?.totalMinutes || 0);
         document.getElementById('my-competition-time').textContent = formatTime(userTotalMins);
         document.getElementById('my-competition-rank').textContent = data.userStats?.rank || '-';
         document.getElementById('competition-total-time').textContent = formatTime(data.totalTime || 0);
-        
-        // Time breakdown is now shown in participant details modal, not always visible
-        
-        // Show/hide buttons based on whether user has joined
         const joinBtn = document.getElementById('join-competition-btn');
         const addBtn = document.getElementById('add-competition-time-btn');
         const removeBtn = document.getElementById('remove-competition-time-btn');
+        const leaveBtn = document.getElementById('leave-competition-btn');
+        const deleteBtn = document.getElementById('delete-competition-btn');
+        const isCreator = Number(data.competition?.creator_id) === Number(currentUser?.id);
         if (data.userStats?.hasJoined) {
             if (joinBtn) joinBtn.style.display = 'none';
             if (addBtn) addBtn.style.display = 'block';
@@ -2105,23 +2250,21 @@ async function loadCompetition() {
             if (addBtn) addBtn.style.display = 'none';
             if (removeBtn) removeBtn.style.display = 'none';
         }
-        
-        // Sync leaderboard entry to match userStats.totalMinutes (ensures consistency)
+        if (leaveBtn) leaveBtn.style.display = (!isCreator && data.userStats?.hasJoined) ? 'block' : 'none';
+        if (deleteBtn) deleteBtn.style.display = isCreator ? 'block' : 'none';
         if (data.leaderboard) {
-            const leaderboardIndex = data.leaderboard.findIndex(u => u.id === currentUser.id);
-            if (leaderboardIndex !== -1) {
-                data.leaderboard[leaderboardIndex].total_minutes = userTotalMins;
-            }
+            const idx = data.leaderboard.findIndex(u => u.id === currentUser.id);
+            if (idx !== -1) data.leaderboard[idx].total_minutes = userTotalMins;
         }
-        
-        // Render leaderboard with synced value
         renderCompetitionLeaderboard(data.leaderboard, userTotalMins);
-        
-        // Check for pending invitations
-        checkPendingInvitations();
     } catch (error) {
-        console.error('Error loading competition:', error);
+        console.error('Error loading competition detail:', error);
     }
+}
+
+async function loadCompetition() {
+    await loadCompetitionsList();
+    if (currentCompetition && currentCompetition.id) await loadCompetitionById(currentCompetition.id);
 }
 
 function renderCompetitionTimeBreakdown(userStats) {
@@ -2370,10 +2513,72 @@ async function createCompetition() {
         showSuccessModal('Competition Created', 'Your competition has been created successfully!');
         document.getElementById('competition-modal').classList.remove('active');
         document.getElementById('competition-form').reset();
-        await loadCompetition();
+        await loadCompetitionsList();
+        if (data.competitionId) selectCompetition(data.competitionId);
     } catch (error) {
         console.error('Error creating competition:', error);
         showErrorModal('Error Creating Competition', 'An error occurred while creating the competition. Please try again.');
+    }
+}
+
+async function openEditCompetitionModal(competitionId) {
+    try {
+        const res = await fetch(`${API_URL}/api/competition/${competitionId}?userId=${currentUser?.id}&_=${Date.now()}`);
+        const data = await res.json();
+        if (!data.competition) {
+            showErrorModal('Error', 'Competition not found.');
+            return;
+        }
+        if (Number(data.competition.creator_id) !== Number(currentUser?.id)) {
+            showErrorModal('Not Allowed', 'Only the creator can edit this competition.');
+            return;
+        }
+        document.getElementById('edit-competition-id').value = competitionId;
+        document.getElementById('edit-competition-title').value = data.competition.title || '';
+        document.getElementById('edit-competition-description').value = data.competition.description || '';
+        document.getElementById('edit-competition-modal').classList.add('active');
+    } catch (err) {
+        console.error('Error opening edit competition:', err);
+        showErrorModal('Error', 'Could not load competition.');
+    }
+}
+
+async function saveEditCompetition() {
+    try {
+        const id = document.getElementById('edit-competition-id').value;
+        const title = document.getElementById('edit-competition-title').value.trim();
+        const description = document.getElementById('edit-competition-description').value.trim();
+        if (!id || !title) {
+            showErrorModal('Invalid', 'Title is required.');
+            return;
+        }
+        if (!currentUser?.id) {
+            showErrorModal('Error', 'You must be logged in to edit a competition.');
+            return;
+        }
+        const response = await fetch(`${API_URL}/api/competition/${id}/update`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: currentUser.id, title, description })
+        });
+        let data;
+        try {
+            data = await response.json();
+        } catch (_) {
+            showErrorModal('Error', 'Server returned an invalid response. Please try again.');
+            return;
+        }
+        if (!response.ok || !data.success) {
+            showErrorModal('Error', data.error || 'Failed to update competition.');
+            return;
+        }
+        showSuccessModal('Competition Updated', 'Your competition has been updated.');
+        document.getElementById('edit-competition-modal').classList.remove('active');
+        await loadCompetitionsList();
+        if (currentCompetition && Number(currentCompetition.id) === Number(id)) await loadCompetitionById(Number(id));
+    } catch (err) {
+        console.error('Error saving competition:', err);
+        showErrorModal('Error', err.message || 'Could not update competition.');
     }
 }
 
@@ -2692,17 +2897,19 @@ function showErrorModal(title, message, icon = '⚠️') {
     modal.id = 'custom-error-modal';
     modal.className = 'modal active';
     modal.innerHTML = `
-        <div class="modal-content" style="max-width: 450px;">
+        <div class="modal-content premium-feedback premium-feedback--error" role="dialog" aria-modal="true">
             <div class="modal-header">
                 <h2>${title || 'Error'}</h2>
                 <button class="btn-icon" onclick="this.closest('.modal').remove()">✕</button>
             </div>
-            <div style="padding: 32px; text-align: center;">
-                <div style="font-size: 48px; margin-bottom: 16px; opacity: 0.8;">${icon}</div>
-                <p style="color: var(--text-secondary); font-size: 15px; margin-bottom: 24px; line-height: 1.5;">
-                    ${message}
-                </p>
-                <button class="btn-primary" onclick="this.closest('.modal').remove()" style="min-width: 120px;">OK</button>
+            <div class="premium-feedback-body">
+                <div class="premium-feedback-icon" aria-hidden="true">
+                    ${renderFeedbackIcon(icon)}
+                </div>
+                <p class="premium-feedback-message">${message}</p>
+                <div class="premium-feedback-actions">
+                    <button class="btn-primary premium-feedback-ok" onclick="this.closest('.modal').remove()">OK</button>
+                </div>
             </div>
         </div>
     `;
@@ -2716,22 +2923,52 @@ function showErrorModal(title, message, icon = '⚠️') {
     });
 }
 
+function escapeHtmlAttr(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function renderFeedbackIcon(icon) {
+    const iconStr = String(icon ?? '').trim();
+    const looksLikeImage =
+        iconStr.includes('/Images/') ||
+        /\.(png|jpg|jpeg|webp|gif|svg)(\?.*)?$/i.test(iconStr) ||
+        /^https?:\/\//i.test(iconStr);
+
+    if (looksLikeImage) {
+        return `<img class="premium-feedback-icon__img" src="${escapeHtmlAttr(iconStr)}" alt="" />`;
+    }
+
+    return `<span class="premium-feedback-icon__glyph">${escapeHtmlAttr(iconStr || '✅')}</span>`;
+}
+
 // Custom success modal function
-function showSuccessModal(title, message, icon = '✅') {
+function showSuccessModal(title, message, icon = '/Images/Checkmark.png?v=1') {
+    const existingSuccess = document.getElementById('custom-success-modal');
+    if (existingSuccess) {
+        existingSuccess.remove();
+    }
+
     const modal = document.createElement('div');
+    modal.id = 'custom-success-modal';
     modal.className = 'modal active';
     modal.innerHTML = `
-        <div class="modal-content" style="max-width: 450px;">
+        <div class="modal-content premium-feedback premium-feedback--success" role="dialog" aria-modal="true">
             <div class="modal-header">
                 <h2>${title || 'Success'}</h2>
                 <button class="btn-icon" onclick="this.closest('.modal').remove()">✕</button>
             </div>
-            <div style="padding: 32px; text-align: center;">
-                <div style="font-size: 48px; margin-bottom: 16px; opacity: 0.8;">${icon}</div>
-                <p style="color: var(--text-secondary); font-size: 15px; margin-bottom: 24px; line-height: 1.5;">
-                    ${message}
-                </p>
-                <button class="btn-primary" onclick="this.closest('.modal').remove()" style="min-width: 120px;">OK</button>
+            <div class="premium-feedback-body">
+                <div class="premium-feedback-icon" aria-hidden="true">
+                    ${renderFeedbackIcon(icon)}
+                </div>
+                <p class="premium-feedback-message">${message}</p>
+                <div class="premium-feedback-actions">
+                    <button class="btn-primary premium-feedback-ok" onclick="this.closest('.modal').remove()">OK</button>
+                </div>
             </div>
         </div>
     `;
@@ -2781,6 +3018,245 @@ async function sendCompetitionInvite() {
     } catch (error) {
         console.error('Error sending invitation:', error);
         showErrorModal('Error', 'An error occurred while sending the invitation. Please try again.');
+    }
+}
+
+// Friends View
+async function loadFriendsData() {
+    try {
+        if (!currentUser?.id) return;
+        const [friendsRes, requestsRes, invitesRes] = await Promise.all([
+            fetch(`${API_URL}/api/friends?userId=${currentUser.id}`),
+            fetch(`${API_URL}/api/friends/requests?userId=${currentUser.id}`),
+            fetch(`${API_URL}/api/competition/invitations?userId=${currentUser.id}`)
+        ]);
+
+        const friendsData = await friendsRes.json();
+        const requestsData = await requestsRes.json();
+        const invitesData = await invitesRes.json();
+
+        renderFriendsList(Array.isArray(friendsData.friends) ? friendsData.friends : []);
+        renderFriendRequests(Array.isArray(requestsData.requests) ? requestsData.requests : []);
+        renderCompetitionInvites(Array.isArray(invitesData.invitations) ? invitesData.invitations : []);
+    } catch (err) {
+        console.error('Error loading friends data:', err);
+    }
+}
+
+function renderFriendsList(friends) {
+    const el = document.getElementById('friends-list');
+    if (!el) return;
+    const countEl = document.getElementById('friends-count');
+    if (countEl) {
+        countEl.textContent = friends.length;
+        countEl.style.display = friends.length ? 'inline-flex' : 'none';
+    }
+    if (!friends.length) {
+        el.innerHTML = `<div class="friend-item"><div class="friend-item__left"><div class="friend-item__meta">No friends yet.</div></div></div>`;
+        return;
+    }
+    el.innerHTML = friends.map(f => `
+        <div class="friend-item" role="button" data-friend-id="${f.id}">
+            <div class="friend-item__left">
+                <div class="friend-item__name">${escapeHtml(f.username || '')}</div>
+                <div class="friend-item__meta">View profile</div>
+            </div>
+        </div>
+    `).join('');
+    el.querySelectorAll('.friend-item[role="button"]').forEach(item => {
+        item.addEventListener('click', () => openFriendProfile(parseInt(item.dataset.friendId)));
+    });
+}
+
+function renderFriendRequests(requests) {
+    const el = document.getElementById('friend-requests-list');
+    if (!el) return;
+    const countEl = document.getElementById('friend-requests-count');
+    if (countEl) {
+        countEl.textContent = requests.length;
+        countEl.style.display = requests.length ? 'inline-flex' : 'none';
+    }
+    if (!requests.length) {
+        el.innerHTML = `<div class="friend-item"><div class="friend-item__left"><div class="friend-item__meta">No pending requests.</div></div></div>`;
+        return;
+    }
+    el.innerHTML = requests.map(r => `
+        <div class="friend-item">
+            <div class="friend-item__left">
+                <div class="friend-item__name">${escapeHtml(r.requester_username || '')}</div>
+                <div class="friend-item__meta">Wants to be friends</div>
+            </div>
+            <div class="friend-item__actions">
+                <button class="btn-small btn-small-primary" data-action="accept" data-request-id="${r.id}">Accept</button>
+                <button class="btn-small btn-small-danger" data-action="decline" data-request-id="${r.id}">Decline</button>
+            </div>
+        </div>
+    `).join('');
+    el.querySelectorAll('button[data-action="accept"]').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await acceptFriendRequest(parseInt(btn.dataset.requestId));
+        });
+    });
+    el.querySelectorAll('button[data-action="decline"]').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await declineFriendRequest(parseInt(btn.dataset.requestId));
+        });
+    });
+}
+
+function renderCompetitionInvites(invitations) {
+    const el = document.getElementById('competition-invites-list');
+    if (!el) return;
+    const countEl = document.getElementById('competition-invites-count');
+    if (countEl) {
+        countEl.textContent = invitations.length;
+        countEl.style.display = invitations.length ? 'inline-flex' : 'none';
+    }
+    if (!invitations.length) {
+        el.innerHTML = `<div class="friend-item"><div class="friend-item__left"><div class="friend-item__meta">No invites right now.</div></div></div>`;
+        return;
+    }
+    el.innerHTML = invitations.map(inv => `
+        <div class="friend-item">
+            <div class="friend-item__left">
+                <div class="friend-item__name">${escapeHtml(inv.competition_title || '')}</div>
+                <div class="friend-item__meta">Invited by ${escapeHtml(inv.inviter_username || '')}</div>
+            </div>
+            <div class="friend-item__actions">
+                <button class="btn-small btn-small-primary" data-invite-id="${inv.id}">Accept</button>
+            </div>
+        </div>
+    `).join('');
+    el.querySelectorAll('button[data-invite-id]').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await acceptCompetitionInvite(parseInt(btn.dataset.inviteId));
+        });
+    });
+}
+
+async function sendFriendRequestFromUI() {
+    try {
+        if (!currentUser?.id) return;
+        const input = document.getElementById('add-friend-username');
+        const username = (input?.value || '').trim();
+        if (!username) {
+            showErrorModal('Missing Username', 'Enter a username to add.');
+            return;
+        }
+        const res = await fetch(`${API_URL}/api/friends/request`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: currentUser.id, friendUsername: username })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+            showErrorModal('Could Not Add Friend', data.error || 'Please try again.');
+            return;
+        }
+        showSuccessModal('Friend Request', data.message || 'Request sent.');
+        if (input) input.value = '';
+        await loadFriendsData();
+    } catch (err) {
+        console.error('Error sending friend request:', err);
+        showErrorModal('Error', 'Could not send friend request.');
+    }
+}
+
+async function acceptFriendRequest(requestId) {
+    try {
+        const res = await fetch(`${API_URL}/api/friends/requests/${requestId}/accept`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: currentUser.id })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+            showErrorModal('Error', data.error || 'Could not accept request.');
+            return;
+        }
+        showSuccessModal('Friend Added', 'You are now friends.');
+        await loadFriendsData();
+    } catch (err) {
+        console.error('Error accepting request:', err);
+        showErrorModal('Error', 'Could not accept request.');
+    }
+}
+
+async function declineFriendRequest(requestId) {
+    try {
+        const res = await fetch(`${API_URL}/api/friends/requests/${requestId}/decline`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: currentUser.id })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+            showErrorModal('Error', data.error || 'Could not decline request.');
+            return;
+        }
+        await loadFriendsData();
+    } catch (err) {
+        console.error('Error declining request:', err);
+        showErrorModal('Error', 'Could not decline request.');
+    }
+}
+
+async function acceptCompetitionInvite(inviteId) {
+    try {
+        const response = await fetch(`${API_URL}/api/competition/invitations/${inviteId}/accept`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: currentUser.id })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            showErrorModal('Error', data.error || 'Failed to accept invite.');
+            return;
+        }
+        showSuccessModal('Invite Accepted', 'You joined the competition.');
+        await loadFriendsData();
+        await loadCompetitionsList();
+        if (data.competitionId) selectCompetition(data.competitionId);
+    } catch (err) {
+        console.error('Error accepting invite:', err);
+        showErrorModal('Error', 'Failed to accept invite.');
+    }
+}
+
+async function openFriendProfile(friendId) {
+    try {
+        selectedFriendId = friendId;
+        const res = await fetch(`${API_URL}/api/users/${friendId}/summary?viewerId=${currentUser.id}&_=${Date.now()}`);
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+            showErrorModal('Error', data.error || 'Could not load friend profile.');
+            return;
+        }
+
+        document.getElementById('friend-empty').style.display = 'none';
+        document.getElementById('friend-detail').style.display = 'block';
+        document.getElementById('friend-detail-name').textContent = data.user.username;
+        document.getElementById('friend-detail-subtitle').textContent = `Last 7 days: ${formatTime(Number(data.stats?.last7DaysMinutes || 0))}`;
+        document.getElementById('friend-total-time').textContent = formatTime(Number(data.stats?.totalMinutes || 0));
+        document.getElementById('friend-total-goals').textContent = String(Number(data.stats?.totalGoals || 0));
+        document.getElementById('friend-active-goals').textContent = String(Number(data.stats?.activeGoals || 0));
+
+        const topEl = document.getElementById('friend-top-goals');
+        const top = Array.isArray(data.topGoals) ? data.topGoals : [];
+        topEl.innerHTML = top.length
+            ? top.map(g => `
+                <div class="friends-top-goal">
+                    <div class="friends-top-goal__title">${escapeHtml(g.title || '')}</div>
+                    <div class="friends-top-goal__time">${formatTime(Number(g.totalMinutes || 0))}</div>
+                </div>
+            `).join('')
+            : `<div class="friend-item"><div class="friend-item__left"><div class="friend-item__meta">No goal activity yet.</div></div></div>`;
+    } catch (err) {
+        console.error('Error opening friend profile:', err);
+        showErrorModal('Error', 'Could not load friend profile.');
     }
 }
 

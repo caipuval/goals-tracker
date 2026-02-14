@@ -140,6 +140,31 @@ if (dbType === 'postgres') {
           FOREIGN KEY (invitee_id) REFERENCES users(id) ON DELETE CASCADE
         )
       `);
+
+      // Friends (requests + accepted friendships)
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS friend_requests (
+          id SERIAL PRIMARY KEY,
+          requester_id INTEGER NOT NULL,
+          addressee_id INTEGER NOT NULL,
+          status VARCHAR(20) DEFAULT 'pending' CHECK(status IN ('pending', 'accepted', 'declined')),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (requester_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY (addressee_id) REFERENCES users(id) ON DELETE CASCADE,
+          UNIQUE(requester_id, addressee_id)
+        )
+      `);
+
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS friendships (
+          user_id INTEGER NOT NULL,
+          friend_id INTEGER NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY (friend_id) REFERENCES users(id) ON DELETE CASCADE,
+          PRIMARY KEY (user_id, friend_id)
+        )
+      `);
       
       console.log('✅ PostgreSQL database initialized');
     } catch (error) {
@@ -282,6 +307,31 @@ if (dbType === 'postgres') {
           FOREIGN KEY (competition_id) REFERENCES competitions(id),
           FOREIGN KEY (inviter_id) REFERENCES users(id),
           FOREIGN KEY (invitee_id) REFERENCES users(id)
+        )
+      `);
+
+      // Friends (requests + accepted friendships)
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS friend_requests (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          requester_id INTEGER NOT NULL,
+          addressee_id INTEGER NOT NULL,
+          status TEXT DEFAULT 'pending',
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(requester_id, addressee_id),
+          FOREIGN KEY (requester_id) REFERENCES users(id),
+          FOREIGN KEY (addressee_id) REFERENCES users(id)
+        )
+      `);
+
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS friendships (
+          user_id INTEGER NOT NULL,
+          friend_id INTEGER NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (user_id, friend_id),
+          FOREIGN KEY (user_id) REFERENCES users(id),
+          FOREIGN KEY (friend_id) REFERENCES users(id)
         )
       `);
       

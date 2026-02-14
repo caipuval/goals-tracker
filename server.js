@@ -9,6 +9,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
+// Serve premium logo (and other images) from /Images
+app.use('/Images', express.static('Images'));
 
 // Helper function to get date range
 function getDateRange(type, date) {
@@ -317,11 +319,257 @@ app.delete('/api/goals/:goalId', async (req, res) => {
   }
 });
 
+// Friends endpoints
+async function areFriends(viewerId, profileUserId) {
+  if (!viewerId || !profileUserId) return false;
+  if (Number(viewerId) === Number(profileUserId)) return true;
+  const row = await db.get(
+    `SELECT 1 as ok FROM friendships WHERE user_id = ? AND friend_id = ? LIMIT 1`,
+    [viewerId, profileUserId]
+  );
+  return !!row;
+}
+
+async function insertFriendshipPair(a, b) {
+  if (db.type === 'postgres') {
+    await db.run(`INSERT INTO friendships (user_id, friend_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [a, b]);
+    await db.run(`INSERT INTO friendships (user_id, friend_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [b, a]);
+  } else {
+    await db.run(`INSERT OR IGNORE INTO friendships (user_id, friend_id) VALUES (?, ?)`, [a, b]);
+    await db.run(`INSERT OR IGNORE INTO friendships (user_id, friend_id) VALUES (?, ?)`, [b, a]);
+  }
+}
+
+// List friends
+app.get('/api/friends', async (req, res) => {
+  try {
+    const userId = parseInt(req.query.userId) || 0;
+    if (!userId) return res.status(400).json({ success: false, error: 'User ID required' });
+    const friends = await db.all(
+      `SELECT u.id, u.username
+       FROM friendships f
+       JOIN users u ON u.id = f.friend_id
+       WHERE f.user_id = ?
+       ORDER BY LOWER(u.username) ASC`,
+      [userId]
+    );
+    res.json({ success: true, friends });
+  } catch (error) {
+    console.error('Error listing friends:', error);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// Incoming friend requests
+app.get('/api/friends/requests', async (req, res) => {
+  try {
+    const userId = parseInt(req.query.userId) || 0;
+    if (!userId) return res.status(400).json({ success: false, error: 'User ID required' });
+    const requests = await db.all(
+      `SELECT fr.id, fr.requester_id, fr.addressee_id, fr.status, fr.created_at,
+              u.username as requester_username
+       FROM friend_requests fr
+       JOIN users u ON u.id = fr.requester_id
+       WHERE fr.addressee_id = ? AND fr.status = 'pending'
+       ORDER BY fr.created_at DESC`,
+      [userId]
+    );
+    res.json({ success: true, requests });
+  } catch (error) {
+    console.error('Error listing friend requests:', error);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// Send friend request (by username)
+app.post('/api/friends/request', async (req, res) => {
+  try {
+    const { userId, friendUsername } = req.body || {};
+    const uid = parseInt(userId) || 0;
+    const uname = String(friendUsername || '').trim();
+    if (!uid || !uname) return res.status(400).json({ success: false, error: 'User ID and username required' });
+
+    const target = await db.get(`SELECT id, username FROM users WHERE LOWER(username) = LOWER(?)`, [uname]);
+    if (!target) return res.status(404).json({ success: false, error: 'User not found' });
+    if (Number(target.id) === Number(uid)) return res.status(400).json({ success: false, error: 'You cannot add yourself.' });
+
+    const already = await db.get(`SELECT 1 as ok FROM friendships WHERE user_id = ? AND friend_id = ? LIMIT 1`, [uid, target.id]);
+    if (already) return res.json({ success: true, message: 'You are already friends.' });
+
+    const existing = await db.get(
+      `SELECT id, requester_id, addressee_id, status
+       FROM friend_requests
+       WHERE (requester_id = ? AND addressee_id = ?) OR (requester_id = ? AND addressee_id = ?)
+       ORDER BY id DESC LIMIT 1`,
+      [uid, target.id, target.id, uid]
+    );
+
+    if (existing && existing.status === 'pending') {
+      // If they already requested you, accept instantly
+      if (Number(existing.requester_id) === Number(target.id) && Number(existing.addressee_id) === Number(uid)) {
+        await db.run(`UPDATE friend_requests SET status = 'accepted' WHERE id = ?`, [existing.id]);
+        await insertFriendshipPair(uid, target.id);
+        return res.json({ success: true, message: `You're now friends with ${target.username}.` });
+      }
+      return res.status(400).json({ success: false, error: 'Friend request already sent.' });
+    }
+
+    if (existing && existing.status === 'accepted') {
+      await insertFriendshipPair(uid, target.id);
+      return res.json({ success: true, message: `You're now friends with ${target.username}.` });
+    }
+
+    await db.run(
+      `INSERT INTO friend_requests (requester_id, addressee_id, status) VALUES (?, ?, 'pending')`,
+      [uid, target.id]
+    );
+    res.json({ success: true, message: `Friend request sent to ${target.username}.` });
+  } catch (error) {
+    console.error('Error sending friend request:', error);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// Accept/decline friend request
+app.post('/api/friends/requests/:requestId/accept', async (req, res) => {
+  try {
+    const requestId = parseInt(req.params.requestId) || 0;
+    const { userId } = req.body || {};
+    const uid = parseInt(userId) || 0;
+    if (!requestId || !uid) return res.status(400).json({ success: false, error: 'Invalid request or user' });
+
+    const request = await db.get(`SELECT * FROM friend_requests WHERE id = ? AND addressee_id = ?`, [requestId, uid]);
+    if (!request) return res.status(404).json({ success: false, error: 'Request not found' });
+    if (request.status !== 'pending') return res.status(400).json({ success: false, error: 'Request already processed' });
+
+    await db.run(`UPDATE friend_requests SET status = 'accepted' WHERE id = ?`, [requestId]);
+    await insertFriendshipPair(request.requester_id, request.addressee_id);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error accepting friend request:', error);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/friends/requests/:requestId/decline', async (req, res) => {
+  try {
+    const requestId = parseInt(req.params.requestId) || 0;
+    const { userId } = req.body || {};
+    const uid = parseInt(userId) || 0;
+    if (!requestId || !uid) return res.status(400).json({ success: false, error: 'Invalid request or user' });
+
+    const request = await db.get(`SELECT * FROM friend_requests WHERE id = ? AND addressee_id = ?`, [requestId, uid]);
+    if (!request) return res.status(404).json({ success: false, error: 'Request not found' });
+    if (request.status !== 'pending') return res.status(400).json({ success: false, error: 'Request already processed' });
+
+    await db.run(`UPDATE friend_requests SET status = 'declined' WHERE id = ?`, [requestId]);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error declining friend request:', error);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// Friend profile summary (friends-only)
+app.get('/api/users/:profileUserId/summary', async (req, res) => {
+  try {
+    const profileUserId = parseInt(req.params.profileUserId) || 0;
+    const viewerId = parseInt(req.query.viewerId) || 0;
+    if (!profileUserId || !viewerId) return res.status(400).json({ success: false, error: 'Invalid user' });
+    const allowed = await areFriends(viewerId, profileUserId);
+    if (!allowed) return res.status(403).json({ success: false, error: 'Not allowed' });
+
+    const user = await db.get(`SELECT id, username FROM users WHERE id = ?`, [profileUserId]);
+    if (!user) return res.status(404).json({ success: false, error: 'User not found' });
+
+    const totals = await db.get(
+      `SELECT 
+         (SELECT COUNT(*) FROM goals WHERE user_id = ?) as total_goals,
+         (SELECT COUNT(*) FROM goals WHERE user_id = ? AND start_date <= CURRENT_DATE AND (end_date IS NULL OR end_date >= CURRENT_DATE)) as active_goals`,
+      [profileUserId, profileUserId]
+    );
+
+    const timeRow = await db.get(
+      `SELECT COALESCE(SUM(gc.duration_minutes), 0) as total_minutes
+       FROM goals g
+       LEFT JOIN goal_completions gc ON gc.goal_id = g.id
+       WHERE g.user_id = ?`,
+      [profileUserId]
+    );
+
+    const last7 = await db.get(
+      db.type === 'postgres'
+        ? `SELECT COALESCE(SUM(gc.duration_minutes), 0) as minutes
+           FROM goals g
+           JOIN goal_completions gc ON gc.goal_id = g.id
+           WHERE g.user_id = ? AND gc.completion_date >= (CURRENT_DATE - INTERVAL '6 days')`
+        : `SELECT COALESCE(SUM(gc.duration_minutes), 0) as minutes
+           FROM goals g
+           JOIN goal_completions gc ON gc.goal_id = g.id
+           WHERE g.user_id = ? AND gc.completion_date >= date('now','-6 days')`,
+      [profileUserId]
+    );
+
+    const topGoals = await db.all(
+      `SELECT g.id, g.title, COALESCE(SUM(gc.duration_minutes), 0) as total_minutes
+       FROM goals g
+       LEFT JOIN goal_completions gc ON gc.goal_id = g.id
+       WHERE g.user_id = ?
+       GROUP BY g.id
+       ORDER BY total_minutes DESC, LOWER(g.title) ASC
+       LIMIT 5`,
+      [profileUserId]
+    );
+
+    res.json({
+      success: true,
+      user,
+      stats: {
+        totalGoals: Number(totals?.total_goals || 0),
+        activeGoals: Number(totals?.active_goals || 0),
+        totalMinutes: Number(timeRow?.total_minutes || 0),
+        last7DaysMinutes: Number(last7?.minutes || 0)
+      },
+      topGoals: topGoals.map(g => ({
+        id: g.id,
+        title: g.title,
+        totalMinutes: Number(g.total_minutes || 0)
+      }))
+    });
+  } catch (error) {
+    console.error('Error fetching user summary:', error);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
 // Competition endpoints
 
 // HELPER FUNCTION: Calculate user's competition time (manual logs + goal completions)
 // This is used EVERYWHERE to ensure consistency
 async function calculateUserCompetitionTime(userId, competitionId, competitionTitle) {
+  // Membership gate: only count time for members (creator or explicitly joined via logs)
+  const competition = await db.get(
+    db.type === 'postgres'
+      ? `SELECT id, creator_id FROM competitions WHERE id = $1`
+      : `SELECT id, creator_id FROM competitions WHERE id = ?`,
+    [competitionId]
+  );
+  if (!competition) {
+    return { manualTotal: 0, goalTotal: 0, total: 0, manualLogs: [], goalCompletions: [] };
+  }
+  const isCreator = Number(competition.creator_id) === Number(userId);
+  if (!isCreator) {
+    const joinedRow = await db.get(
+      db.type === 'postgres'
+        ? `SELECT 1 as ok FROM competition_logs WHERE competition_id = $1 AND user_id = $2 LIMIT 1`
+        : `SELECT 1 as ok FROM competition_logs WHERE competition_id = ? AND user_id = ? LIMIT 1`,
+      [competitionId, userId]
+    );
+    if (!joinedRow) {
+      return { manualTotal: 0, goalTotal: 0, total: 0, manualLogs: [], goalCompletions: [] };
+    }
+  }
+
   // Get all manual logs for this user
   const manualLogs = await db.all(
     db.type === 'postgres'
@@ -389,23 +637,203 @@ async function calculateUserCompetitionTime(userId, competitionId, competitionTi
   };
 }
 
-// Get active competition - COMPLETELY REBUILT
+// List all competitions (for competition boxes)
+app.get('/api/competitions', async (req, res) => {
+  try {
+    const userId = parseInt(req.query.userId) || 0;
+    // Only return competitions the user is "in": creator OR explicitly joined (has any log, even 0)
+    const rows = await db.all(
+      db.type === 'postgres'
+        ? `
+          SELECT c.id, c.creator_id, c.title, c.description, c.created_at
+          FROM competitions c
+          WHERE c.creator_id = $1
+             OR EXISTS (
+               SELECT 1 FROM competition_logs cl
+               WHERE cl.competition_id = c.id AND cl.user_id = $1
+             )
+          ORDER BY c.created_at DESC
+        `
+        : `
+          SELECT c.id, c.creator_id, c.title, c.description, c.created_at
+          FROM competitions c
+          WHERE c.creator_id = ?
+             OR EXISTS (
+               SELECT 1 FROM competition_logs cl
+               WHERE cl.competition_id = c.id AND cl.user_id = ?
+             )
+          ORDER BY c.created_at DESC
+        `,
+      db.type === 'postgres' ? [userId] : [userId, userId]
+    );
+    const list = [];
+    for (const c of rows) {
+      const competitionId = c.id;
+      const allUserLogs = await db.all(
+        db.type === 'postgres'
+          ? `SELECT DISTINCT user_id FROM competition_logs WHERE competition_id = $1`
+          : `SELECT DISTINCT user_id FROM competition_logs WHERE competition_id = ?`,
+        [competitionId]
+      );
+      const allUserIds = new Set(allUserLogs.map(r => Number(r.user_id)));
+      // Ensure creator is always included as a participant
+      allUserIds.add(Number(c.creator_id));
+      let totalTime = 0;
+      for (const uid of allUserIds) {
+        const timeData = await calculateUserCompetitionTime(uid, competitionId, c.title);
+        totalTime += timeData.total;
+      }
+      list.push({
+        id: c.id,
+        title: c.title,
+        description: c.description || '',
+        totalTime,
+        participantCount: allUserIds.size,
+        hasUserJoined: true,
+        isCreator: Number(c.creator_id) === Number(userId)
+      });
+    }
+    res.json({ competitions: list });
+  } catch (error) {
+    console.error('List competitions error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get one competition by id (full details)
+app.get('/api/competition/:competitionId', async (req, res) => {
+  try {
+    const userId = parseInt(req.query.userId) || 0;
+    const competitionId = parseInt(req.params.competitionId);
+    if (!competitionId) return res.status(400).json({ success: false, error: 'Invalid competition ID' });
+    const competition = await db.get(`
+      SELECT * FROM competitions WHERE id = ${db.type === 'postgres' ? '$1' : '?'}
+    `, [competitionId]);
+    if (!competition) return res.json({ competition: null });
+    const isCreator = Number(competition.creator_id) === Number(userId);
+    const joinRow = await db.get(
+      db.type === 'postgres'
+        ? `SELECT 1 as ok FROM competition_logs WHERE competition_id = $1 AND user_id = $2 LIMIT 1`
+        : `SELECT 1 as ok FROM competition_logs WHERE competition_id = ? AND user_id = ? LIMIT 1`,
+      [competition.id, userId]
+    );
+    if (!isCreator && !joinRow) {
+      return res.status(403).json({ success: false, error: 'You are not a participant in this competition.' });
+    }
+    const id = competition.id;
+    const allUserLogs = await db.all(
+      db.type === 'postgres'
+        ? `SELECT id, duration_minutes, logged_date, logged_at FROM competition_logs WHERE competition_id = $1 AND user_id = $2 ORDER BY logged_at DESC`
+        : `SELECT id, duration_minutes, logged_date, logged_at FROM competition_logs WHERE competition_id = ? AND user_id = ? ORDER BY logged_at DESC`,
+      [id, userId]
+    );
+    const userTimeData = await calculateUserCompetitionTime(userId, id, competition.title);
+    const userTotalMinutes = userTimeData.total;
+    const manualLogMinutes = userTimeData.manualTotal;
+    const goalCompletionMinutes = userTimeData.goalTotal;
+    const hasJoined = isCreator || (allUserLogs && allUserLogs.length > 0);
+    const allCompetitionLogs = await db.all(
+      db.type === 'postgres'
+        ? `SELECT DISTINCT user_id FROM competition_logs WHERE competition_id = $1`
+        : `SELECT DISTINCT user_id FROM competition_logs WHERE competition_id = ?`,
+      [id]
+    );
+    const allUserIds = new Set(allCompetitionLogs.map(r => Number(r.user_id)));
+    allUserIds.add(Number(competition.creator_id));
+    const userTotals = {};
+    for (const uid of allUserIds) {
+      const timeData = await calculateUserCompetitionTime(uid, id, competition.title);
+      userTotals[uid] = timeData.total;
+    }
+    if (hasJoined) {
+      userTotals[userId] = userTotalMinutes;
+      userTotals[String(userId)] = userTotalMinutes;
+    }
+    const userIds = Object.keys(userTotals).map(i => parseInt(i));
+    const users = userIds.length ? await db.all(`SELECT id, username FROM users WHERE id IN (${userIds.map(() => '?').join(',')})`, userIds) : [];
+    const userMap = {};
+    users.forEach(u => { userMap[u.id] = u.username; });
+    const leaderboard = Object.entries(userTotals).map(([uid, total]) => ({
+      id: parseInt(uid),
+      username: userMap[parseInt(uid)] || 'Unknown',
+      total_minutes: parseInt(uid) === userId ? userTotalMinutes : total
+    }));
+    leaderboard.sort((a, b) => b.total_minutes - a.total_minutes);
+    const userLeaderboardIndex = leaderboard.findIndex(u => u.id === userId);
+    if (userLeaderboardIndex !== -1) leaderboard[userLeaderboardIndex].total_minutes = userTotalMinutes;
+    else if (hasJoined) {
+      const user = await db.get(`SELECT id, username FROM users WHERE id = ${db.type === 'postgres' ? '$1' : '?'}`, [userId]);
+      if (user) {
+        leaderboard.push({ id: userId, username: user.username, total_minutes: userTotalMinutes });
+        leaderboard.sort((a, b) => b.total_minutes - a.total_minutes);
+      }
+    }
+    let rank = '-';
+    if (hasJoined && userTotalMinutes > 0) {
+      const usersAbove = leaderboard.filter(u => u.total_minutes > userTotalMinutes).length;
+      rank = String(usersAbove + 1);
+    }
+    const totalCompetitionMinutes = Object.values(userTotals).reduce((sum, t) => sum + t, 0);
+    const userManualLogs = allUserLogs.filter(log => (Number(log.duration_minutes) || 0) > 0).map(log => ({
+      id: log.id,
+      duration_minutes: Number(log.duration_minutes) || 0,
+      logged_date: log.logged_date,
+      logged_at: log.logged_at,
+      type: 'manual'
+    }));
+    const userGoalCompletions = (userTimeData.goalCompletions || []).map(gc => ({
+      id: gc.goal_id,
+      completion_date: gc.completion_date,
+      duration_minutes: gc.duration_minutes,
+      goal_title: gc.goal_title,
+      type: 'goal'
+    }));
+    res.json({
+      competition,
+      leaderboard,
+      userStats: {
+        totalMinutes: userTotalMinutes,
+        rank,
+        hasJoined,
+        manualLogs: userManualLogs,
+        goalCompletions: userGoalCompletions,
+        goalCompletionMinutes: goalCompletionMinutes
+      },
+      totalTime: totalCompetitionMinutes,
+      isCreator
+    });
+  } catch (error) {
+    console.error('Get competition by id error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get active competition (single most recent - kept for backward compat; frontend should use list + get by id)
 app.get('/api/competition', async (req, res) => {
   try {
     const userId = parseInt(req.query.userId) || 0;
+    const requestedCompetitionId = parseInt(req.query.competitionId) || null;
     
-    // Step 1: Get the most recent competition
-    const competition = await db.get(`
-      SELECT * FROM competitions 
-      ORDER BY created_at DESC 
-      LIMIT 1
-    `);
+    let competition;
+    if (requestedCompetitionId) {
+      competition = await db.get(`
+        SELECT * FROM competitions WHERE id = ${db.type === 'postgres' ? '$1' : '?'}
+      `, [requestedCompetitionId]);
+    }
+    if (!competition) {
+      competition = await db.get(`
+        SELECT * FROM competitions 
+        ORDER BY created_at DESC 
+        LIMIT 1
+      `);
+    }
     
     if (!competition) {
       return res.json({ competition: null });
     }
     
-    const competitionId = competition.id;
+    const id = competition.id;
+    const competitionId = id;
     
     // Step 2: Get ALL competition_logs entries for this user (for display/deletion)
     const allUserLogs = await db.all(
@@ -616,17 +1044,77 @@ app.post('/api/competition', async (req, res) => {
       return res.status(400).json({ success: false, error: 'User ID and title required' });
     }
     
-    const result = await db.run(`
-      INSERT INTO competitions (creator_id, title, description)
-      VALUES (?, ?, ?)
-    `, [userId, title, description || '']);
-    
+    const sql = db.type === 'postgres'
+      ? `INSERT INTO competitions (creator_id, title, description) VALUES ($1, $2, $3) RETURNING id`
+      : `INSERT INTO competitions (creator_id, title, description) VALUES (?, ?, ?)`;
+    const result = await db.run(sql, [userId, title, description || '']);
+    const competitionId = Number(result.lastID);
+
+    // Auto-join creator (so they can see it immediately, and goal completions count only for members)
+    const creatorJoinExists = await db.get(
+      db.type === 'postgres'
+        ? `SELECT 1 as ok FROM competition_logs WHERE competition_id = $1 AND user_id = $2 LIMIT 1`
+        : `SELECT 1 as ok FROM competition_logs WHERE competition_id = ? AND user_id = ? LIMIT 1`,
+      [competitionId, userId]
+    );
+    if (!creatorJoinExists) {
+      const joinSql = db.type === 'postgres'
+        ? `INSERT INTO competition_logs (competition_id, user_id, duration_minutes, logged_date) VALUES ($1, $2, 0, CURRENT_DATE)`
+        : `INSERT INTO competition_logs (competition_id, user_id, duration_minutes, logged_date) VALUES (?, ?, 0, DATE('now'))`;
+      await db.run(joinSql, [competitionId, userId]);
+    }
+
     console.log('Competition created successfully:', result);
-    res.json({ success: true, competitionId: result.lastID });
+    res.json({ success: true, competitionId });
   } catch (error) {
     console.error('Error creating competition:', error);
     console.error('Error stack:', error.stack);
     res.status(400).json({ success: false, error: error.message || 'Unknown error' });
+  }
+});
+
+// Update competition (creator only) - title, description (POST for broad compatibility)
+app.post('/api/competition/:competitionId/update', async (req, res) => {
+  try {
+    const competitionId = parseInt(req.params.competitionId);
+    const body = req.body || {};
+    const { userId, title, description } = body;
+    if (!competitionId || !userId) {
+      return res.status(400).json({ success: false, error: 'Invalid competition or user' });
+    }
+    const comp = await db.get(
+      db.type === 'postgres'
+        ? `SELECT id, creator_id FROM competitions WHERE id = $1`
+        : `SELECT id, creator_id FROM competitions WHERE id = ?`,
+      [competitionId]
+    );
+    if (!comp) return res.status(404).json({ success: false, error: 'Competition not found' });
+    if (Number(comp.creator_id) !== Number(userId)) {
+      return res.status(403).json({ success: false, error: 'Only the creator can edit this competition.' });
+    }
+    const updates = [];
+    const params = [];
+    let p = 0;
+    if (title !== undefined) {
+      updates.push(db.type === 'postgres' ? `title = $${++p}` : 'title = ?');
+      params.push(title);
+    }
+    if (description !== undefined) {
+      updates.push(db.type === 'postgres' ? `description = $${++p}` : 'description = ?');
+      params.push(description ?? '');
+    }
+    if (updates.length === 0) {
+      return res.status(400).json({ success: false, error: 'Nothing to update' });
+    }
+    params.push(competitionId);
+    const sql = db.type === 'postgres'
+      ? `UPDATE competitions SET ${updates.join(', ')} WHERE id = $${++p}`
+      : `UPDATE competitions SET ${updates.join(', ')} WHERE id = ?`;
+    await db.run(sql, params);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error updating competition:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -635,11 +1123,44 @@ app.post('/api/competition/log', async (req, res) => {
   try {
     const { userId, competitionId, durationMinutes } = req.body;
     
-    if (!userId || !competitionId || durationMinutes === undefined || durationMinutes <= 0) {
-      return res.status(400).json({ success: false, error: 'Missing required fields or invalid duration' });
+    if (!userId || !competitionId || durationMinutes === undefined || durationMinutes === null) {
+      return res.status(400).json({ success: false, error: 'Missing required fields' });
     }
     
     const duration = Number(durationMinutes);
+    if (Number.isNaN(duration) || duration < 0) {
+      return res.status(400).json({ success: false, error: 'Invalid duration' });
+    }
+
+    // Ensure competition exists + creator id
+    const comp = await db.get(
+      db.type === 'postgres'
+        ? `SELECT id, creator_id FROM competitions WHERE id = $1`
+        : `SELECT id, creator_id FROM competitions WHERE id = ?`,
+      [competitionId]
+    );
+    if (!comp) return res.status(404).json({ success: false, error: 'Competition not found' });
+
+    const isCreator = Number(comp.creator_id) === Number(userId);
+    const joinedRow = await db.get(
+      db.type === 'postgres'
+        ? `SELECT 1 as ok FROM competition_logs WHERE competition_id = $1 AND user_id = $2 LIMIT 1`
+        : `SELECT 1 as ok FROM competition_logs WHERE competition_id = ? AND user_id = ? LIMIT 1`,
+      [competitionId, userId]
+    );
+    const isMember = isCreator || !!joinedRow;
+
+    // Join flow: duration === 0 means "join" (creates a 0-minute log entry)
+    if (duration === 0 && !isMember) {
+      const joinSql = db.type === 'postgres'
+        ? `INSERT INTO competition_logs (competition_id, user_id, duration_minutes, logged_date) VALUES ($1, $2, 0, CURRENT_DATE)`
+        : `INSERT INTO competition_logs (competition_id, user_id, duration_minutes, logged_date) VALUES (?, ?, 0, DATE('now'))`;
+      await db.run(joinSql, [competitionId, userId]);
+      return res.json({ success: true, joined: true });
+    }
+    if (!isMember) {
+      return res.status(403).json({ success: false, error: 'You must join this competition first.' });
+    }
     
     const dateSql = db.type === 'postgres' 
       ? `INSERT INTO competition_logs (competition_id, user_id, duration_minutes, logged_date) VALUES ($1, $2, $3, CURRENT_DATE)`
@@ -651,6 +1172,86 @@ app.post('/api/competition/log', async (req, res) => {
   } catch (error) {
     console.error('Error adding competition time:', error);
     res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// Leave a competition (removes membership + manual logs)
+app.post('/api/competition/leave', async (req, res) => {
+  try {
+    const { userId, competitionId } = req.body || {};
+    if (!userId || !competitionId) {
+      return res.status(400).json({ success: false, error: 'Missing required fields' });
+    }
+    const comp = await db.get(
+      db.type === 'postgres'
+        ? `SELECT id, creator_id FROM competitions WHERE id = $1`
+        : `SELECT id, creator_id FROM competitions WHERE id = ?`,
+      [competitionId]
+    );
+    if (!comp) return res.status(404).json({ success: false, error: 'Competition not found' });
+    if (Number(comp.creator_id) === Number(userId)) {
+      return res.status(400).json({ success: false, error: 'Creators cannot leave their own competition. Delete it instead.' });
+    }
+    await db.run(
+      db.type === 'postgres'
+        ? `DELETE FROM competition_logs WHERE competition_id = $1 AND user_id = $2`
+        : `DELETE FROM competition_logs WHERE competition_id = ? AND user_id = ?`,
+      [competitionId, userId]
+    );
+    await db.run(
+      db.type === 'postgres'
+        ? `DELETE FROM competition_invitations WHERE competition_id = $1 AND invitee_id = $2`
+        : `DELETE FROM competition_invitations WHERE competition_id = ? AND invitee_id = ?`,
+      [competitionId, userId]
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Leave competition error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Delete a competition (creator only)
+app.delete('/api/competition/:competitionId', async (req, res) => {
+  try {
+    const competitionId = parseInt(req.params.competitionId);
+    const { userId } = req.body || {};
+    if (!competitionId || !userId) {
+      return res.status(400).json({ success: false, error: 'Missing required fields' });
+    }
+    const comp = await db.get(
+      db.type === 'postgres'
+        ? `SELECT id, creator_id FROM competitions WHERE id = $1`
+        : `SELECT id, creator_id FROM competitions WHERE id = ?`,
+      [competitionId]
+    );
+    if (!comp) return res.status(404).json({ success: false, error: 'Competition not found' });
+    if (Number(comp.creator_id) !== Number(userId)) {
+      return res.status(403).json({ success: false, error: 'Only the creator can delete this competition.' });
+    }
+    // Delete children first for safety (Postgres schema may not cascade)
+    await db.run(
+      db.type === 'postgres'
+        ? `DELETE FROM competition_invitations WHERE competition_id = $1`
+        : `DELETE FROM competition_invitations WHERE competition_id = ?`,
+      [competitionId]
+    );
+    await db.run(
+      db.type === 'postgres'
+        ? `DELETE FROM competition_logs WHERE competition_id = $1`
+        : `DELETE FROM competition_logs WHERE competition_id = ?`,
+      [competitionId]
+    );
+    await db.run(
+      db.type === 'postgres'
+        ? `DELETE FROM competitions WHERE id = $1`
+        : `DELETE FROM competitions WHERE id = ?`,
+      [competitionId]
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Delete competition error:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

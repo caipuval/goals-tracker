@@ -4,16 +4,24 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Goals Tracker - Premium</title>
-    <link rel="stylesheet" href="style.css?v=27">
+    <link rel="stylesheet" href="style.css?v=38">
 </head>
 <body>
     <!-- Login/Register Screen -->
     <div id="auth-screen" class="screen active">
         <div class="auth-container">
             <div class="logo">
-                <div class="logo-icon">⚡</div>
+                <div class="logo-icon" aria-hidden="true">
+                    <img
+                        class="logo-icon-img"
+                        src="/Images/GT_Logo_2.png?v=1"
+                        alt="Goals Tracker logo"
+                        onerror="this.style.display='none'; this.nextElementSibling.style.display='grid';"
+                    />
+                    <span class="logo-icon-fallback" style="display:none">⚡</span>
+                </div>
                 <h1>GOALS TRACKER</h1>
-                <p class="tagline">Compete. Achieve. Excel.</p>
+                <p class="tagline">Built for Growth</p>
             </div>
             
             <div class="auth-forms">
@@ -25,7 +33,7 @@
                 <form id="login-form" class="auth-form active">
                     <div class="form-group">
                         <label>Email or Username</label>
-                        <input type="text" id="login-username" required placeholder="your.email@example.com or username">
+                        <input type="text" id="login-username" required placeholder="">
                     </div>
                     <div class="form-group">
                         <label>Password</label>
@@ -38,7 +46,7 @@
                 <form id="register-form" class="auth-form">
                     <div class="form-group">
                         <label>Email *</label>
-                        <input type="email" id="register-email" required placeholder="your.email@example.com">
+                        <input type="email" id="register-email" required placeholder="">
                     </div>
                     <div class="form-group">
                         <label>Username *</label>
@@ -59,7 +67,15 @@
     <div id="app-screen" class="screen">
         <div class="app-header">
             <div class="header-brand">
-                <span class="logo-icon-small">⚡</span>
+                <span class="logo-icon-small" aria-hidden="true">
+                    <img
+                        class="logo-icon-small-img"
+                        src="/Images/GT_Logo_2.png?v=1"
+                        alt="Goals Tracker logo"
+                        onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-block';"
+                    />
+                    <span class="logo-icon-small-fallback" style="display:none">⚡</span>
+                </span>
                 <span>GOALS TRACKER</span>
                 <span class="header-username" id="username-display"></span>
             </div>
@@ -85,6 +101,10 @@
                 <button class="nav-item" data-view="leaderboard">
                     <span class="icon">🏆</span>
                     <span>Leaderboard</span>
+                </button>
+                <button class="nav-item" data-view="friends">
+                    <span class="icon">👥</span>
+                    <span>Friends</span>
                 </button>
                 <button class="nav-item" data-view="competition">
                     <span class="icon">⚔️</span>
@@ -197,19 +217,118 @@
                     <div id="leaderboard-list"></div>
                 </div>
 
+                <!-- Friends View -->
+                <div id="friends-view" class="view">
+                    <div class="view-header">
+                        <h2>Friends</h2>
+                    </div>
+                    <div class="friends-content" id="friends-content">
+                        <div class="friends-left">
+                            <div class="friends-sidebar-panel">
+                                <div class="friends-sidebar-header">
+                                    <div>
+                                        <h3>Friends</h3>
+                                        <p class="friends-sidebar-subtitle">Add friends, view profiles, and accept competition invites.</p>
+                                    </div>
+                                </div>
+
+                                <div class="friends-add-row">
+                                    <div class="friends-add-input" aria-label="Friend username">
+                                        <span class="friends-add-input__icon">@</span>
+                                        <input type="text" id="add-friend-username" placeholder="Add by username" autocomplete="off" />
+                                    </div>
+                                    <button type="button" class="btn-primary friends-add-btn" id="add-friend-btn">Send</button>
+                                </div>
+
+                                <div class="friends-section">
+                                    <div class="friends-section__header">
+                                        <span>Requests</span>
+                                        <span class="friends-count" id="friend-requests-count" style="display:none"></span>
+                                    </div>
+                                    <div id="friend-requests-list" class="friends-list"></div>
+                                </div>
+
+                                <div class="friends-section">
+                                    <div class="friends-section__header">
+                                        <span>Invites</span>
+                                        <span class="friends-count" id="competition-invites-count" style="display:none"></span>
+                                    </div>
+                                    <div id="competition-invites-list" class="friends-list"></div>
+                                </div>
+
+                                <div class="friends-section friends-section--last">
+                                    <div class="friends-section__header">
+                                        <span>Friends</span>
+                                        <span class="friends-count" id="friends-count" style="display:none"></span>
+                                    </div>
+                                    <div id="friends-list" class="friends-list"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="friends-right">
+                            <div class="friends-right-panel">
+                                <div class="friends-hero" id="friend-empty" style="display: block;">
+                                    <div class="friends-hero__icon" aria-hidden="true">👤</div>
+                                    <h3>Select a friend</h3>
+                                    <p>Click a friend to view their goals and time summary.</p>
+                                </div>
+
+                                <div id="friend-detail" class="friends-detail" style="display: none;">
+                                    <div class="friends-detail-header">
+                                        <div>
+                                            <h3 id="friend-detail-name"></h3>
+                                            <p id="friend-detail-subtitle"></p>
+                                        </div>
+                                    </div>
+
+                                    <div class="stats-overview friends-stats">
+                                        <div class="stat-card">
+                                            <div class="stat-label">Total Time</div>
+                                            <div class="stat-value" id="friend-total-time">0m</div>
+                                        </div>
+                                        <div class="stat-card">
+                                            <div class="stat-label">Goals</div>
+                                            <div class="stat-value" id="friend-total-goals">0</div>
+                                        </div>
+                                        <div class="stat-card">
+                                            <div class="stat-label">Active Goals</div>
+                                            <div class="stat-value" id="friend-active-goals">0</div>
+                                        </div>
+                                    </div>
+
+                                    <div class="friends-card friends-detail-card">
+                                        <h3>Top Goals</h3>
+                                        <div id="friend-top-goals" class="friends-top-goals"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Competition View -->
                 <div id="competition-view" class="view">
-                    <div class="view-header">
+                    <div class="view-header competition-view-header">
                         <h2>Competition</h2>
-                        <button id="create-competition-btn" class="btn-primary">+ Create Competition</button>
+                        <button id="create-competition-btn" type="button" class="btn-primary">+ Create Competition</button>
                     </div>
                     <div id="competition-content">
-                        <div id="no-competition" class="empty-state">
-                            <div class="empty-icon">⚔️</div>
-                            <h3>No Active Competition</h3>
-                            <p>Create a competition goal and challenge your friends!</p>
+                        <div id="no-competition" class="empty-state" style="display: none;">
+                            <div class="empty-icon" aria-hidden="true">
+                                <img
+                                    class="empty-icon-img"
+                                    src="/Images/Competition.png?v=1"
+                                    alt=""
+                                    onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
+                                />
+                                <span class="empty-icon-fallback" style="display:none">🏆</span>
+                            </div>
+                            <h3>No competitions yet</h3>
+                            <p>Create a competition and challenge your friends!</p>
                         </div>
-                        <div id="competition-details" style="display: none;">
+                        <div id="competition-list" class="competition-list" style="display: none;"></div>
+                        <div id="competition-detail" class="competition-detail" style="display: none;">
                             <div class="competition-header">
                                 <h3 id="competition-title"></h3>
                                 <p id="competition-description"></p>
@@ -228,11 +347,13 @@
                                     <div class="stat-value" id="competition-total-time">0m</div>
                                 </div>
                             </div>
-                            <div class="competition-actions" style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+                            <div class="competition-actions">
                                 <button id="join-competition-btn" class="btn-primary" style="display: none;">Join Competition</button>
-                                <button id="invite-competition-btn" class="btn-primary" style="background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--accent);">Invite</button>
+                                <button id="invite-competition-btn" class="btn-primary btn-secondary-style">Invite</button>
                                 <button id="add-competition-time-btn" class="btn-primary">Add Time</button>
-                                <button id="remove-competition-time-btn" class="btn-primary" style="background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--accent);">Remove Time</button>
+                                <button id="remove-competition-time-btn" class="btn-primary btn-secondary-style">Remove Time</button>
+                                <button id="leave-competition-btn" class="btn-primary btn-secondary-style" style="display: none;">Leave</button>
+                                <button id="delete-competition-btn" class="btn-primary btn-danger-style" style="display: none;">Delete</button>
                             </div>
                             <div class="competition-leaderboard">
                                 <h4>Competition Leaderboard</h4>
@@ -350,6 +471,31 @@
         </div>
     </div>
 
+    <!-- Edit Competition Modal -->
+    <div id="edit-competition-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Edit Competition</h2>
+                <button class="btn-icon" id="close-edit-competition-modal">✕</button>
+            </div>
+            <form id="edit-competition-form">
+                <input type="hidden" id="edit-competition-id">
+                <div class="form-group">
+                    <label>Competition Goal Title *</label>
+                    <input type="text" id="edit-competition-title" required placeholder="e.g., Daily Reading">
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea id="edit-competition-description" placeholder="What are you competing on?"></textarea>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-secondary" id="cancel-edit-competition">Cancel</button>
+                    <button type="submit" class="btn-primary">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Log Competition Time Modal -->
     <div id="log-competition-modal" class="modal">
         <div class="modal-content">
@@ -427,6 +573,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=28"></script>
+    <script src="app.js?v=38"></script>
 </body>
 </html>
