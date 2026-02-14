@@ -64,6 +64,7 @@ function showApp() {
     
     renderCalendar();
     loadLeaderboard();
+    loadFriendsData();
 }
 
 // Event Listeners
@@ -168,6 +169,12 @@ function setupEventListeners() {
         if (e.key === 'Enter') {
             e.preventDefault();
             await sendFriendRequestFromUI();
+        }
+    });
+    document.getElementById('friend-period')?.addEventListener('change', async (e) => {
+        const period = e.target.value;
+        if (selectedFriendId) {
+            await loadFriendProfile(selectedFriendId, period);
         }
     });
 
@@ -1008,8 +1015,8 @@ function shouldGoalBeCompletedToday(goal, today) {
 }
 
 // Activity Chart Function
-function renderActivityChart(activities) {
-    const canvas = document.getElementById('activity-chart');
+function renderActivityChart(activities, canvasId = 'activity-chart') {
+    const canvas = document.getElementById(canvasId);
     if (!canvas || activities.length === 0) {
         // Clear canvas if exists but no data
         if (canvas) {
@@ -1050,6 +1057,7 @@ function renderActivityChart(activities) {
         '#e9d5ff', // Pale purple
         '#6d28d9'  // Rich purple
     ];
+    const purpleColors = purpleShades;
     
     const centerX = width / 2;
     const centerY = height / 2;
@@ -1857,9 +1865,14 @@ function renderActivityStats(activityStats) {
         container.classList.add('is-empty');
         container.innerHTML = `
             <div class="time-by-activity-empty">
-                <span class="time-by-activity-empty__icon" aria-hidden="true">📈</span>
-                <p class="time-by-activity-empty__title">No activity yet</p>
-                <p class="time-by-activity-empty__subtitle">Complete some goals to see your statistics!</p>
+                <div class="time-by-activity-empty__icon" aria-hidden="true">
+                    <svg width="56" height="56" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="28" cy="28" r="24" stroke="currentColor" stroke-width="1.5" stroke-opacity="0.25"/>
+                        <path d="M28 18v10l6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </div>
+                <p class="time-by-activity-empty__title">No time logged</p>
+                <p class="time-by-activity-empty__subtitle">Complete some goals in this period to see your activity here.</p>
             </div>
         `;
         // Clear chart and legend
@@ -3035,12 +3048,24 @@ async function loadFriendsData() {
         const requestsData = await requestsRes.json();
         const invitesData = await invitesRes.json();
 
-        renderFriendsList(Array.isArray(friendsData.friends) ? friendsData.friends : []);
-        renderFriendRequests(Array.isArray(requestsData.requests) ? requestsData.requests : []);
-        renderCompetitionInvites(Array.isArray(invitesData.invitations) ? invitesData.invitations : []);
+        const friends = Array.isArray(friendsData.friends) ? friendsData.friends : [];
+        const requests = Array.isArray(requestsData.requests) ? requestsData.requests : [];
+        const invitations = Array.isArray(invitesData.invitations) ? invitesData.invitations : [];
+        renderFriendsList(friends);
+        renderFriendRequests(requests);
+        renderCompetitionInvites(invitations);
+        updateFriendsNavBadge(requests.length, invitations.length);
     } catch (err) {
         console.error('Error loading friends data:', err);
     }
+}
+
+function updateFriendsNavBadge(pendingRequests, pendingInvites) {
+    const badge = document.getElementById('friends-nav-badge');
+    if (!badge) return;
+    const total = (pendingRequests || 0) + (pendingInvites || 0);
+    badge.textContent = total > 99 ? '99+' : String(total);
+    badge.style.display = total > 0 ? 'inline-flex' : 'none';
 }
 
 function renderFriendsList(friends) {
@@ -3229,35 +3254,125 @@ async function acceptCompetitionInvite(inviteId) {
 async function openFriendProfile(friendId) {
     try {
         selectedFriendId = friendId;
-        const res = await fetch(`${API_URL}/api/users/${friendId}/summary?viewerId=${currentUser.id}&_=${Date.now()}`);
-        const data = await res.json();
-        if (!res.ok || !data.success) {
-            showErrorModal('Error', data.error || 'Could not load friend profile.');
-            return;
-        }
-
         document.getElementById('friend-empty').style.display = 'none';
         document.getElementById('friend-detail').style.display = 'block';
-        document.getElementById('friend-detail-name').textContent = data.user.username;
-        document.getElementById('friend-detail-subtitle').textContent = `Last 7 days: ${formatTime(Number(data.stats?.last7DaysMinutes || 0))}`;
-        document.getElementById('friend-total-time').textContent = formatTime(Number(data.stats?.totalMinutes || 0));
-        document.getElementById('friend-total-goals').textContent = String(Number(data.stats?.totalGoals || 0));
-        document.getElementById('friend-active-goals').textContent = String(Number(data.stats?.activeGoals || 0));
-
-        const topEl = document.getElementById('friend-top-goals');
-        const top = Array.isArray(data.topGoals) ? data.topGoals : [];
-        topEl.innerHTML = top.length
-            ? top.map(g => `
-                <div class="friends-top-goal">
-                    <div class="friends-top-goal__title">${escapeHtml(g.title || '')}</div>
-                    <div class="friends-top-goal__time">${formatTime(Number(g.totalMinutes || 0))}</div>
-                </div>
-            `).join('')
-            : `<div class="friend-item"><div class="friend-item__left"><div class="friend-item__meta">No goal activity yet.</div></div></div>`;
+        const select = document.getElementById('friend-period');
+        const period = select?.value || 'week';
+        await loadFriendProfile(friendId, period);
     } catch (err) {
         console.error('Error opening friend profile:', err);
         showErrorModal('Error', 'Could not load friend profile.');
     }
+}
+
+async function loadFriendProfile(friendId, period) {
+    const periodLabels = {
+        today: 'Today',
+        yesterday: 'Yesterday',
+        week: 'This week',
+        month: 'This month',
+        '3months': 'Last 3 months',
+        year: 'This year',
+        all: 'All time'
+    };
+    const { startDate, endDate } = period === 'all' ? { startDate: null, endDate: null } : getStatisticsDates(period, contextDate || new Date());
+    const qs = new URLSearchParams({
+        viewerId: String(currentUser.id),
+        _: String(Date.now())
+    });
+    if (startDate && endDate) {
+        qs.set('startDate', startDate);
+        qs.set('endDate', endDate);
+    }
+    const res = await fetch(`${API_URL}/api/users/${friendId}/summary?${qs.toString()}`);
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+        showErrorModal('Error', data.error || 'Could not load friend profile.');
+        return;
+    }
+
+    const totalMins = Number(data.stats?.totalMinutes || 0);
+    document.getElementById('friend-detail-name').textContent = data.user.username;
+    document.getElementById('friend-detail-subtitle').textContent = `${periodLabels[period] || 'Summary'}: ${formatTime(totalMins)}`;
+    document.getElementById('friend-total-time').textContent = formatTime(totalMins);
+    document.getElementById('friend-total-goals').textContent = String(Number(data.stats?.totalGoals || 0));
+    document.getElementById('friend-active-goals').textContent = String(Number(data.stats?.activeGoals || 0));
+
+    const dateGoalsTitle = document.getElementById('friend-date-goals-title');
+    if (dateGoalsTitle) dateGoalsTitle.textContent = (periodLabels[period] || 'Summary') + "'s Goals";
+
+    renderFriendActivityStats(Array.isArray(data.activity) ? data.activity : []);
+
+    const topEl = document.getElementById('friend-top-goals');
+    const dateGoals = Array.isArray(data.dateGoals) ? data.dateGoals : [];
+    topEl.innerHTML = dateGoals.length
+        ? dateGoals.map(g => `
+            <div class="friends-top-goal friends-date-goal">
+                <div class="friends-top-goal__title">${escapeHtml(g.title || '')}</div>
+                <div class="friends-top-goal__right">
+                    <span class="friends-date-goal__status ${g.completed ? 'friends-date-goal__status--done' : 'friends-date-goal__status--not-done'}">${g.completed ? 'Done' : 'Not done'}</span>
+                    ${g.completed ? `<span class="friends-top-goal__time">${formatTime(Number(g.totalMinutes || 0))}</span>` : ''}
+                </div>
+            </div>
+        `).join('')
+        : `<div class="friend-item"><div class="friend-item__left"><div class="friend-item__meta">No goals in this period.</div></div></div>`;
+}
+
+function renderFriendActivityStats(activityRows) {
+    const container = document.getElementById('friend-activity-stats');
+    if (!container) return;
+    container.innerHTML = '';
+
+    const activityStats = {};
+    activityRows.forEach(r => {
+        const name = r.activity;
+        const mins = Number(r.minutes || 0);
+        if (!name) return;
+        activityStats[name] = (activityStats[name] || 0) + mins;
+    });
+
+    const activities = Object.entries(activityStats).filter(([_, mins]) => (Number(mins) || 0) > 0);
+    if (activities.length === 0) {
+        container.classList.add('is-empty');
+        container.innerHTML = `
+            <div class="time-by-activity-empty">
+                <div class="time-by-activity-empty__icon" aria-hidden="true">
+                    <svg width="56" height="56" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="28" cy="28" r="24" stroke="currentColor" stroke-width="1.5" stroke-opacity="0.25"/>
+                        <path d="M28 18v10l6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </div>
+                <p class="time-by-activity-empty__title">No time logged</p>
+                <p class="time-by-activity-empty__subtitle">When they log goal time in this period, it will show here.</p>
+            </div>
+        `;
+        renderActivityChart([], 'friend-activity-chart');
+        const legend = document.querySelector('.friend-activity-chart-container .activity-chart-legend');
+        if (legend) legend.remove();
+        return;
+    }
+
+    container.classList.remove('is-empty');
+    const maxMinutes = Math.max(...activities.map(([_, m]) => Number(m) || 0));
+    activities.sort((a, b) => (Number(b[1]) || 0) - (Number(a[1]) || 0));
+    activities.forEach(([activity, minutes]) => {
+        const minutesNum = Number(minutes) || 0;
+        const card = document.createElement('div');
+        card.className = 'activity-stat-card';
+        const percentage = maxMinutes > 0 ? (minutesNum / maxMinutes) * 100 : 0;
+        card.innerHTML = `
+            <div class="activity-stat-header">
+                <span class="activity-name">${escapeHtml(activity)}</span>
+                <span class="activity-time">${formatTime(minutesNum)}</span>
+            </div>
+            <div class="activity-stat-bar">
+                <div class="activity-stat-fill" style="width: ${percentage}%"></div>
+            </div>
+        `;
+        container.appendChild(card);
+    });
+
+    renderActivityChart(activities, 'friend-activity-chart');
 }
 
 async function checkPendingInvitations() {
@@ -3269,6 +3384,7 @@ async function checkPendingInvitations() {
         
         if (data.success && data.invitations && data.invitations.length > 0) {
             showInvitationNotification(data.invitations);
+            await loadFriendsData();
         }
     } catch (error) {
         console.error('Error checking invitations:', error);

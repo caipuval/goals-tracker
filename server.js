@@ -475,6 +475,8 @@ app.get('/api/users/:profileUserId/summary', async (req, res) => {
   try {
     const profileUserId = parseInt(req.params.profileUserId) || 0;
     const viewerId = parseInt(req.query.viewerId) || 0;
+    const startDate = req.query.startDate ? String(req.query.startDate) : null;
+    const endDate = req.query.endDate ? String(req.query.endDate) : null;
     if (!profileUserId || !viewerId) return res.status(400).json({ success: false, error: 'Invalid user' });
     const allowed = await areFriends(viewerId, profileUserId);
     if (!allowed) return res.status(403).json({ success: false, error: 'Not allowed' });
@@ -489,12 +491,16 @@ app.get('/api/users/:profileUserId/summary', async (req, res) => {
       [profileUserId, profileUserId]
     );
 
+    const rangeFilter = startDate && endDate ? 'AND gc.completion_date BETWEEN ? AND ?' : '';
+    const rangeParams = startDate && endDate ? [startDate, endDate] : [];
+
     const timeRow = await db.get(
       `SELECT COALESCE(SUM(gc.duration_minutes), 0) as total_minutes
        FROM goals g
        LEFT JOIN goal_completions gc ON gc.goal_id = g.id
-       WHERE g.user_id = ?`,
-      [profileUserId]
+       WHERE g.user_id = ?
+         ${rangeFilter}`,
+      [profileUserId, ...rangeParams]
     );
 
     const last7 = await db.get(
@@ -510,15 +516,36 @@ app.get('/api/users/:profileUserId/summary', async (req, res) => {
       [profileUserId]
     );
 
-    const topGoals = await db.all(
+    // Goals active in the selected period, with completion status and total minutes in that period
+    const goalRangeFilter = startDate && endDate
+      ? 'AND g.start_date <= ? AND (g.end_date IS NULL OR g.end_date >= ?)'
+      : '';
+    const goalRangeParams = startDate && endDate ? [endDate, startDate] : [];
+    const dateGoalsJoin = startDate && endDate
+      ? 'LEFT JOIN goal_completions gc ON gc.goal_id = g.id AND gc.completion_date BETWEEN ? AND ?'
+      : 'LEFT JOIN goal_completions gc ON gc.goal_id = g.id';
+    const dateGoalsParams = startDate && endDate
+      ? [profileUserId, startDate, endDate, ...goalRangeParams]
+      : [profileUserId, ...goalRangeParams];
+    const dateGoals = await db.all(
       `SELECT g.id, g.title, COALESCE(SUM(gc.duration_minutes), 0) as total_minutes
+       FROM goals g
+       ${dateGoalsJoin}
+       WHERE g.user_id = ? ${goalRangeFilter}
+       GROUP BY g.id
+       ORDER BY LOWER(g.title) ASC`,
+      dateGoalsParams
+    );
+
+    const activityRows = await db.all(
+      `SELECT g.title as activity, COALESCE(SUM(gc.duration_minutes), 0) as minutes
        FROM goals g
        LEFT JOIN goal_completions gc ON gc.goal_id = g.id
        WHERE g.user_id = ?
-       GROUP BY g.id
-       ORDER BY total_minutes DESC, LOWER(g.title) ASC
-       LIMIT 5`,
-      [profileUserId]
+         ${rangeFilter}
+       GROUP BY g.title
+       ORDER BY minutes DESC, LOWER(g.title) ASC`,
+      [profileUserId, ...rangeParams]
     );
 
     res.json({
@@ -530,9 +557,14 @@ app.get('/api/users/:profileUserId/summary', async (req, res) => {
         totalMinutes: Number(timeRow?.total_minutes || 0),
         last7DaysMinutes: Number(last7?.minutes || 0)
       },
-      topGoals: topGoals.map(g => ({
+      activity: activityRows.map(r => ({
+        activity: r.activity,
+        minutes: Number(r.minutes || 0)
+      })),
+      dateGoals: dateGoals.map(g => ({
         id: g.id,
         title: g.title,
+        completed: Number(g.total_minutes || 0) > 0,
         totalMinutes: Number(g.total_minutes || 0)
       }))
     });

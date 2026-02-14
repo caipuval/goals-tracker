@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Goals Tracker - Premium</title>
-    <link rel="stylesheet" href="style.css?v=38">
+    <link rel="stylesheet" href="style.css?v=39">
 </head>
 <body>
     <!-- Login/Register Screen -->
@@ -105,6 +105,7 @@
                 <button class="nav-item" data-view="friends">
                     <span class="icon">👥</span>
                     <span>Friends</span>
+                    <span class="friends-nav-badge" id="friends-nav-badge" style="display: none;" aria-label="New activity">0</span>
                 </button>
                 <button class="nav-item" data-view="competition">
                     <span class="icon">⚔️</span>
@@ -276,9 +277,20 @@
 
                                 <div id="friend-detail" class="friends-detail" style="display: none;">
                                     <div class="friends-detail-header">
-                                        <div>
+                                        <div class="friends-detail-meta">
                                             <h3 id="friend-detail-name"></h3>
                                             <p id="friend-detail-subtitle"></p>
+                                        </div>
+                                        <div class="friends-detail-controls">
+                                            <select id="friend-period" class="select-input friends-period-select">
+                                                <option value="today" selected>Today</option>
+                                                <option value="yesterday">Yesterday</option>
+                                                <option value="week">This Week</option>
+                                                <option value="month">This Month</option>
+                                                <option value="3months">3 Months</option>
+                                                <option value="year">This Year</option>
+                                                <option value="all">All Time</option>
+                                            </select>
                                         </div>
                                     </div>
 
@@ -297,9 +309,21 @@
                                         </div>
                                     </div>
 
+                                    <div class="stats-breakdown friends-breakdown">
+                                        <div class="friends-breakdown-header">
+                                            <h3>Time by Activity</h3>
+                                        </div>
+                                        <div class="friends-breakdown-grid">
+                                            <div id="friend-activity-stats"></div>
+                                            <div class="activity-chart-container friend-activity-chart-container">
+                                                <canvas id="friend-activity-chart"></canvas>
+                                            </div>
+                                        </div>
+                                    </div>
+
                                     <div class="friends-card friends-detail-card">
-                                        <h3>Top Goals</h3>
-                                        <div id="friend-top-goals" class="friends-top-goals"></div>
+                                        <h3 id="friend-date-goals-title">Today's Goals</h3>
+                                        <div id="friend-top-goals" class="friends-top-goals friends-date-goals"></div>
                                     </div>
                                 </div>
                             </div>
@@ -573,6 +597,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=38"></script>
+    <script src="app.js?v=39"></script>
 </body>
 </html>

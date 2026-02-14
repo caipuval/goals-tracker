@@ -467,6 +467,12 @@ body {
 
 .nav-item .icon {
     font-size: 20px;
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
 }
 
 .nav-item:hover {
@@ -478,6 +484,26 @@ body {
     background: var(--accent);
     color: var(--bg-primary);
     font-weight: 600;
+}
+
+.friends-nav-badge {
+    margin-left: auto;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    background: var(--accent);
+    color: var(--bg-primary);
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.nav-item.active .friends-nav-badge {
+    background: var(--bg-primary);
+    color: var(--accent);
 }
 
 /* Content */
@@ -1411,12 +1437,14 @@ body {
 }
 
 /* Time by Activity — empty state (no activity) */
-#activity-stats.is-empty {
-    min-height: 280px;
+#activity-stats.is-empty,
+#friend-activity-stats.is-empty {
+    min-height: 260px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
+    width: 100%;
 }
 
 .time-by-activity-empty {
@@ -1425,30 +1453,36 @@ body {
     align-items: center;
     justify-content: center;
     text-align: center;
-    padding: 32px 24px;
+    padding: 40px 24px;
     width: 100%;
     box-sizing: border-box;
-    margin-top: 135px;
+    flex: 0 0 auto;
 }
 
 .time-by-activity-empty__icon {
-    font-size: 48px;
-    line-height: 1;
-    margin-bottom: 12px;
-    opacity: 0.55;
+    color: var(--text-secondary);
+    opacity: 0.5;
+    margin-bottom: 16px;
+    line-height: 0;
+}
+
+.time-by-activity-empty__icon svg {
+    display: block;
 }
 
 .time-by-activity-empty__title {
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 600;
     color: var(--text-primary);
-    margin: 0 0 4px 0;
+    margin: 0 0 6px 0;
 }
 
 .time-by-activity-empty__subtitle {
-    font-size: 14px;
+    font-size: 13px;
     color: var(--text-secondary);
     margin: 0;
+    max-width: 260px;
+    line-height: 1.4;
 }
 
 .activity-chart-container {
@@ -1674,16 +1708,21 @@ body {
     position: absolute;
     top: 12px;
     right: 12px;
-    width: 32px;
-    height: 32px;
+    width: 36px;
+    height: 36px;
     padding: 0;
     border: none;
-    border-radius: 8px;
+    border-radius: 10px;
     background: var(--bg-tertiary);
     color: var(--text-secondary);
-    font-size: 14px;
+    font-size: 16px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     cursor: pointer;
     transition: background 0.2s, color 0.2s;
+    flex-shrink: 0;
 }
 
 .competition-box-edit:hover {
@@ -2287,6 +2326,83 @@ body {
 .friends-detail-header p {
     margin: 6px 0 0 0;
     color: var(--text-secondary);
+    line-height: 1.4;
+    max-width: 520px;
+}
+
+.friends-detail-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+}
+
+.friends-detail-meta {
+    min-width: 0;
+}
+
+.friends-detail-controls {
+    flex-shrink: 0;
+}
+
+.friends-period-select {
+    min-width: 170px;
+    padding: 10px 16px;
+    border-radius: 12px;
+    background: rgba(0, 0, 0, 0.18);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+.friends-period-select:focus {
+    outline: none;
+    border-color: rgba(168, 85, 247, 0.55);
+    box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.12);
+}
+
+.friends-period-select,
+.friends-period-select option {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+.select-input option {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+.friends-breakdown {
+    margin-top: 12px;
+}
+
+.friends-breakdown-grid {
+    display: grid;
+    grid-template-columns: 1.15fr 0.85fr;
+    gap: 22px;
+    align-items: start;
+}
+
+.friends-breakdown #friend-activity-stats.is-empty {
+    min-height: 260px;
+}
+
+#friend-activity-stats.is-empty .time-by-activity-empty {
+    margin-left: 85%;
+    margin-right: 0;
+}
+
+.friend-activity-chart-container {
+    min-height: 260px;
+}
+
+@media (max-width: 900px) {
+    .friends-breakdown-grid {
+        grid-template-columns: 1fr;
+    }
+    .friends-period-select {
+        width: 100%;
+    }
 }
 
 .friends-stats .stat-value {
@@ -2322,6 +2438,30 @@ body {
     color: var(--accent);
     font-weight: 800;
     flex-shrink: 0;
+}
+
+.friends-top-goal__right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.friends-date-goal__status {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 8px;
+}
+
+.friends-date-goal__status--done {
+    background: rgba(34, 197, 94, 0.2);
+    color: #22c55e;
+}
+
+.friends-date-goal__status--not-done {
+    background: rgba(148, 163, 184, 0.2);
+    color: var(--text-secondary);
 }
 
 @media (max-width: 900px) {
