@@ -145,7 +145,10 @@ app.get('/api/users', async (req, res) => {
 app.post('/api/goals', async (req, res) => {
   try {
     const { userId, title, description, durationMinutes, type, startDate } = req.body;
-    const dateRange = getDateRange(type, startDate);
+    if (!startDate || typeof startDate !== 'string') {
+      return res.status(400).json({ success: false, error: 'Goal date (startDate) is required' });
+    }
+    const dateRange = getDateRange(type, startDate.trim());
     
     const result = await db.run(
       db.type === 'postgres'
@@ -169,7 +172,14 @@ app.get('/api/goals/:userId', async (req, res) => {
     const { date, type } = req.query;
     
     const paramStyle = db.type === 'postgres' ? ['$1', '$2', '$3'] : ['?', '?', '?'];
-    let query = `SELECT * FROM goals WHERE user_id = ${paramStyle[0]}`;
+    // Cast DATE columns to text in Postgres so clients always receive YYYY-MM-DD (not ISO timestamps)
+    let query = db.type === 'postgres'
+      ? `SELECT id, user_id, title, description, duration_minutes, type,
+           start_date::text as start_date,
+           end_date::text as end_date,
+           created_at
+         FROM goals WHERE user_id = ${paramStyle[0]}`
+      : `SELECT * FROM goals WHERE user_id = ${paramStyle[0]}`;
     const params = [userId];
     
     if (date && type) {
@@ -221,7 +231,11 @@ app.get('/api/goals/:goalId/completions', async (req, res) => {
     const { goalId } = req.params;
     const completions = await db.all(
       db.type === 'postgres'
-        ? 'SELECT * FROM goal_completions WHERE goal_id = $1'
+        ? `SELECT id, goal_id,
+             completion_date::text as completion_date,
+             duration_minutes,
+             completed_at
+           FROM goal_completions WHERE goal_id = $1`
         : 'SELECT * FROM goal_completions WHERE goal_id = ?',
       [goalId]
     );

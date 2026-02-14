@@ -586,15 +586,17 @@ function createDayElement(date, otherMonth) {
 }
 
 function getGoalsForDate(dateStr) {
-    const checkDate = new Date(dateStr);
+    const checkDate = parseYMDToLocalDate(dateStr);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    if (!checkDate) return [];
     checkDate.setHours(0, 0, 0, 0);
     
     return allGoals.filter(goal => {
-        const goalStart = new Date(goal.start_date);
+        const goalStart = parseYMDToLocalDate(goal.start_date);
+        if (!goalStart) return false;
         goalStart.setHours(0, 0, 0, 0);
-        const goalEnd = goal.end_date ? new Date(goal.end_date) : null;
+        const goalEnd = goal.end_date ? parseYMDToLocalDate(goal.end_date) : null;
         if (goalEnd) goalEnd.setHours(0, 0, 0, 0);
         
         // Check if this date falls within the goal's date range
@@ -621,13 +623,16 @@ function getGoalsForDate(dateStr) {
         
         // If no exact match, try comparing dates (in case of format differences)
         if (!completion && goal.completions) {
-            const checkDateObj = new Date(dateStr);
-            checkDateObj.setHours(0, 0, 0, 0);
-            completion = goal.completions.find(c => {
-                const compDate = new Date(c.completion_date);
-                compDate.setHours(0, 0, 0, 0);
-                return compDate.getTime() === checkDateObj.getTime();
-            });
+            const checkDateObj = parseYMDToLocalDate(dateStr);
+            if (checkDateObj) {
+                checkDateObj.setHours(0, 0, 0, 0);
+                completion = goal.completions.find(c => {
+                    const compDate = parseYMDToLocalDate(c.completion_date);
+                    if (!compDate) return false;
+                    compDate.setHours(0, 0, 0, 0);
+                    return compDate.getTime() === checkDateObj.getTime();
+                });
+            }
         }
         
         const isCompleted = !!completion;
@@ -641,10 +646,12 @@ function getGoalsForDate(dateStr) {
                 isFailed = true;
             } else if (goal.type === 'one-time') {
                 // One-time goal: only failed if this IS the goal's date and it's past
-                const goalStart = new Date(goal.start_date);
-                goalStart.setHours(0, 0, 0, 0);
-                if (checkDate.getTime() === goalStart.getTime()) {
-                    isFailed = true; // One-time goal failed if not completed on its exact date
+                const goalStart = parseYMDToLocalDate(goal.start_date);
+                if (goalStart) {
+                    goalStart.setHours(0, 0, 0, 0);
+                    if (checkDate.getTime() === goalStart.getTime()) {
+                        isFailed = true; // One-time goal failed if not completed on its exact date
+                    }
                 }
             }
             // Weekly/monthly goals: don't mark as failed for individual days
@@ -740,14 +747,21 @@ function createGoalCard(goal, dateStr = null) {
     // For daily goals without duration, always show progress if there are any completions
     const shouldShowProgress = hasDuration || hasLoggedTime || (goal.type === 'daily' && goal.completions && goal.completions.length > 0);
     
-    // Format dates
+    // Format dates (parse as local YYYY-MM-DD to avoid timezone shift)
     const formatDateDisplay = (dateStr) => {
         if (!dateStr) return '';
-        const date = new Date(dateStr);
+        const s = (dateStr + '').trim().slice(0, 10);
+        const [y, m, d] = s.split('-').map(Number);
+        if (!y || !m || !d) return '';
+        const date = new Date(y, m - 1, d);
         return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
     };
     
-    const createdDate = formatDateDisplay(goal.created_at || goal.start_date);
+    const goalStartStr = (goal.start_date || '').toString().trim().slice(0, 10);
+    const goalEndStr = (goal.end_date || goal.start_date || '').toString().trim().slice(0, 10);
+    const dueLabel = goalStartStr === goalEndStr || !goalEndStr
+        ? (goalStartStr ? `Due: ${formatDateDisplay(goalStartStr)}` : '')
+        : `Due: ${formatDateDisplay(goalStartStr)} – ${formatDateDisplay(goalEndStr)}`;
     
     // Get latest completion date
     let completedDate = '';
@@ -764,7 +778,7 @@ function createGoalCard(goal, dateStr = null) {
                 <div class="goal-card-title">${goal.title}</div>
                 ${goal.description ? `<div class="goal-card-description">${goal.description}</div>` : ''}
                 <div class="goal-card-dates">
-                    ${createdDate ? `<span class="goal-date-info">Created: ${createdDate}</span>` : ''}
+                    ${dueLabel ? `<span class="goal-date-info">${dueLabel}</span>` : ''}
                     ${completedDate ? `<span class="goal-date-info">Completed: ${completedDate}</span>` : ''}
                 </div>
             </div>
@@ -855,6 +869,12 @@ async function checkMidnightAutoFail() {
     try {
         const response = await fetch(`${API_URL}/api/goals/${currentUser.id}`);
         const goals = await response.json();
+
+        // Normalize date fields (Postgres may return ISO timestamps)
+        goals.forEach(g => {
+            g.start_date = normalizeToLocalYMD(g.start_date);
+            g.end_date = g.end_date ? normalizeToLocalYMD(g.end_date) : null;
+        });
         
         for (let goal of goals) {
             // Check if goal should be completed today based on its type
@@ -864,6 +884,9 @@ async function checkMidnightAutoFail() {
                 // Check if goal was completed today
                 const completionsResponse = await fetch(`${API_URL}/api/goals/${goal.id}/completions`);
                 const completions = await completionsResponse.json();
+                completions.forEach(c => {
+                    c.completion_date = normalizeToLocalYMD(c.completion_date);
+                });
                 const todayCompletion = completions.find(c => c.completion_date === today);
                 
                 if (!todayCompletion && goal.type !== 'one-time') {
@@ -887,13 +910,15 @@ function shouldGoalBeCompletedToday(goal, today) {
     } else if (goal.type === 'daily') {
         return true; // Daily goals should be completed every day
     } else if (goal.type === 'weekly') {
-        const todayDate = new Date(today);
-        const startDate = new Date(goal.start_date);
+        const todayDate = parseYMDToLocalDate(today);
+        const startDate = parseYMDToLocalDate(goal.start_date);
+        if (!todayDate || !startDate) return false;
         const daysDiff = Math.floor((todayDate - startDate) / (1000 * 60 * 60 * 24));
         return daysDiff >= 0 && daysDiff % 7 === 6; // End of week
     } else if (goal.type === 'monthly') {
-        const todayDate = new Date(today);
-        const startDate = new Date(goal.start_date);
+        const todayDate = parseYMDToLocalDate(today);
+        const startDate = parseYMDToLocalDate(goal.start_date);
+        if (!todayDate || !startDate) return false;
         return todayDate.getDate() === startDate.getDate() && 
                todayDate.getMonth() !== startDate.getMonth();
     }
@@ -1127,6 +1152,12 @@ async function loadGoals() {
         const response = await fetch(`${API_URL}/api/goals/${currentUser.id}`);
         const goals = await response.json();
         console.log('Loaded goals:', goals);
+
+        // Normalize goal date fields coming from the API (Postgres may return ISO timestamps)
+        goals.forEach(g => {
+            g.start_date = normalizeToLocalYMD(g.start_date);
+            g.end_date = g.end_date ? normalizeToLocalYMD(g.end_date) : null;
+        });
         
         // Load completions for each goal
         for (let goal of goals) {
@@ -1135,6 +1166,10 @@ async function loadGoals() {
                 const completionsResponse = await fetch(`${API_URL}/api/goals/${goal.id}/completions`);
                 const completions = await completionsResponse.json();
                 goal.completions = Array.isArray(completions) ? completions : [];
+                // Normalize completion dates too
+                goal.completions.forEach(c => {
+                    c.completion_date = normalizeToLocalYMD(c.completion_date);
+                });
                 console.log(`  Goal "${goal.title}" completions:`, goal.completions);
             } catch (error) {
                 console.error(`Error loading completions for goal ${goal.id}:`, error);
@@ -1170,25 +1205,17 @@ function renderGoalsList() {
         }
     }
     
-    // Filter by time period (use context date for "today" calculations)
+    // Filter by time period: show goals whose *goal date* (start_date–end_date) overlaps the period
     const period = document.getElementById('goals-period')?.value || 'today';
     if (period !== 'all') {
-        // Use context date for period calculations
         const { startDate, endDate } = getStatisticsDates(period, effectiveDate);
         filteredGoals = filteredGoals.filter(goal => {
-            // Check if goal was created in the period OR has completions in the period
-            const goalCreatedDate = goal.created_at ? goal.created_at.split('T')[0] : goal.start_date;
-            const createdInPeriod = goalCreatedDate >= startDate && goalCreatedDate <= endDate;
-            
-            // Check if goal has completions in the period
-            const hasCompletionsInPeriod = goal.completions && goal.completions.length > 0 && 
-                goal.completions.some(c => {
-                    const completionDate = c.completion_date;
-                    return completionDate >= startDate && completionDate <= endDate;
-                });
-            
-            // Show goal if it was created in period OR has completions in period
-            return createdInPeriod || hasCompletionsInPeriod;
+            const goalStart = (goal.start_date || '').toString().trim().slice(0, 10);
+            const goalEnd = (goal.end_date || goal.start_date || '').toString().trim().slice(0, 10);
+            if (!goalStart) return false;
+            // Goal is in period if its date range overlaps [startDate, endDate]
+            const goalInPeriod = goalStart <= endDate && goalEnd >= startDate;
+            return goalInPeriod;
         });
     }
     
@@ -1246,7 +1273,11 @@ async function createGoal() {
     const title = document.getElementById('goal-title').value;
     const description = document.getElementById('goal-description').value;
     const type = document.getElementById('goal-type').value;
-    const startDate = document.getElementById('goal-start-date').value;
+    // Use the exact date from the Goal Date picker (YYYY-MM-DD) so the goal is saved on the selected day
+    const rawGoalDate = document.getElementById('goal-start-date').value;
+    const startDate = (rawGoalDate && rawGoalDate.trim())
+        ? rawGoalDate.trim().slice(0, 10)  // ensure we only send YYYY-MM-DD, no time/timezone
+        : formatDate(getEffectiveSelectedDate());
     
     // Get duration - convert hours to minutes if needed
     const durationValue = document.getElementById('goal-duration').value;
@@ -1598,7 +1629,35 @@ function closeModal() {
     // Goal start date is set when opening the modal.
 }
 
+function isYMDString(value) {
+    return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function parseYMDToLocalDate(ymd) {
+    if (!ymd) return null;
+    const s = String(ymd).trim().slice(0, 10);
+    const [y, m, d] = s.split('-').map(Number);
+    if (!y || !m || !d) return null;
+    return new Date(y, m - 1, d);
+}
+
+function normalizeToLocalYMD(value) {
+    // Goals/completions may come back from Postgres as ISO timestamps (e.g. 2026-02-14T22:00:00.000Z).
+    // Normalize them to a local YYYY-MM-DD string so date-based filtering works for future dates.
+    if (!value) return '';
+    if (isYMDString(value)) return value;
+
+    // If it's an ISO string or Date-like, parse and format in LOCAL time.
+    const d = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(d.getTime())) {
+        // Fallback: best-effort slice
+        return String(value).trim().slice(0, 10);
+    }
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function formatDate(date) {
+    if (isYMDString(date)) return date;
     const d = new Date(date);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
@@ -1656,6 +1715,10 @@ function getStatisticsDates(period, referenceDate = null) {
     
     if (period === 'today') {
         startDate = endDate = formatDate(today);
+    } else if (period === 'tomorrow') {
+        const tomorrow = new Date(today);
+        tomorrow.setDate(today.getDate() + 1);
+        startDate = endDate = formatDate(tomorrow);
     } else if (period === 'yesterday') {
         const yesterday = new Date(today);
         yesterday.setDate(today.getDate() - 1);
