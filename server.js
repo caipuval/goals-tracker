@@ -525,7 +525,8 @@ app.get('/api/users/:profileUserId/summary', async (req, res) => {
       ? 'LEFT JOIN goal_completions gc ON gc.goal_id = g.id AND gc.completion_date BETWEEN ? AND ?'
       : 'LEFT JOIN goal_completions gc ON gc.goal_id = g.id';
     const dateGoalsParams = startDate && endDate
-      ? [profileUserId, startDate, endDate, ...goalRangeParams]
+      // NOTE: placeholders in JOIN come before WHERE placeholders
+      ? [startDate, endDate, profileUserId, ...goalRangeParams]
       : [profileUserId, ...goalRangeParams];
     const dateGoals = await db.all(
       `SELECT g.id, g.title, COALESCE(SUM(gc.duration_minutes), 0) as total_minutes
