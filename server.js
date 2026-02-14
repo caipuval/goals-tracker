@@ -1634,7 +1634,20 @@ app.post('/api/competition/invite', async (req, res) => {
 app.get('/api/competition/invitations', async (req, res) => {
   try {
     const userId = parseInt(req.query.userId) || 0;
+    const username = req.query.username ? String(req.query.username).trim() : '';
+    if (!userId && !username) {
+      return res.status(400).json({ success: false, error: 'User ID or username required' });
+    }
     
+    // Some older rows may have invitee_id NULL (or clients may send a mismatched userId).
+    // To ensure invites always show for the right user, match by invitee_id OR invitee_username (case-insensitive).
+    let whereClause = `ci.status = 'pending' AND ci.invitee_id = ?`;
+    let params = [userId];
+    if (username) {
+      whereClause = `ci.status = 'pending' AND (ci.invitee_id = ? OR LOWER(ci.invitee_username) = LOWER(?))`;
+      params = [userId, username];
+    }
+
     const invitations = await db.all(`
       SELECT 
         ci.id,
@@ -1649,9 +1662,9 @@ app.get('/api/competition/invitations', async (req, res) => {
       FROM competition_invitations ci
       JOIN competitions c ON c.id = ci.competition_id
       JOIN users u ON u.id = ci.inviter_id
-      WHERE ci.invitee_id = ? AND ci.status = 'pending'
+      WHERE ${whereClause}
       ORDER BY ci.created_at DESC
-    `, [userId]);
+    `, params);
     
     res.json({ success: true, invitations });
   } catch (error) {

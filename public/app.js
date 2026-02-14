@@ -3041,7 +3041,7 @@ async function loadFriendsData() {
         const [friendsRes, requestsRes, invitesRes] = await Promise.all([
             fetch(`${API_URL}/api/friends?userId=${currentUser.id}`),
             fetch(`${API_URL}/api/friends/requests?userId=${currentUser.id}`),
-            fetch(`${API_URL}/api/competition/invitations?userId=${currentUser.id}`)
+            fetch(`${API_URL}/api/competition/invitations?userId=${currentUser.id}&username=${encodeURIComponent(currentUser.username || '')}`)
         ]);
 
         const friendsData = await friendsRes.json();
@@ -3379,7 +3379,7 @@ async function checkPendingInvitations() {
     try {
         if (!currentUser) return;
         
-        const response = await fetch(`${API_URL}/api/competition/invitations?userId=${currentUser.id}`);
+        const response = await fetch(`${API_URL}/api/competition/invitations?userId=${currentUser.id}&username=${encodeURIComponent(currentUser.username || '')}`);
         const data = await response.json();
         
         if (data.success && data.invitations && data.invitations.length > 0) {
