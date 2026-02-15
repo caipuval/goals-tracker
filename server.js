@@ -432,13 +432,22 @@ app.post('/api/friends/request', async (req, res) => {
       return res.json({ success: true, message: `You're now friends with ${target.username}.` });
     }
 
+    const requesterId = Number(uid);
+    const addresseeId = Number(target.id);
     await db.run(
       `INSERT INTO friend_requests (requester_id, addressee_id, status) VALUES (?, ?, 'pending')`,
-      [uid, target.id]
+      [requesterId, addresseeId]
     );
     res.json({ success: true, message: `Friend request sent to ${target.username}.` });
   } catch (error) {
     console.error('Error sending friend request:', error);
+    const isFkError = error.code === '23503' || (error.message && /foreign key constraint.*requester_id/i.test(error.message));
+    if (isFkError) {
+      return res.status(401).json({
+        success: false,
+        error: 'Your session is invalid or your account was removed. Please log out and log in again (or register again).'
+      });
+    }
     res.status(400).json({ success: false, error: error.message });
   }
 });
