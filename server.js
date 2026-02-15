@@ -5,6 +5,11 @@ const db = require('./database');
 
 const app = express();
 
+// Health check (for Render and load balancers – respond immediately)
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ ok: true, ts: new Date().toISOString() });
+});
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -1591,8 +1596,11 @@ app.post('/api/competition/invite', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Competition not found' });
     }
     
-    // Check if invitee user exists
-    const invitee = await db.get(`SELECT id, username FROM users WHERE username = ?`, [inviteeUsername.trim()]);
+    // Check if invitee user exists (case-insensitive; Postgres usernames are case-sensitive by default)
+    const invitee = await db.get(
+      `SELECT id, username FROM users WHERE LOWER(username) = LOWER(?)`,
+      [inviteeUsername.trim()]
+    );
     if (!invitee) {
       return res.status(404).json({ success: false, error: 'User not found' });
     }
@@ -1622,7 +1630,7 @@ app.post('/api/competition/invite', async (req, res) => {
     await db.run(`
       INSERT INTO competition_invitations (competition_id, inviter_id, invitee_username, invitee_id, status)
       VALUES (?, ?, ?, ?, 'pending')
-    `, [competitionId, inviterId, inviteeUsername.trim(), invitee.id]);
+    `, [competitionId, inviterId, invitee.username, invitee.id]);
     
     res.json({ success: true, message: `Invitation sent to ${inviteeUsername}` });
   } catch (error) {
@@ -1716,7 +1724,8 @@ app.post('/api/competition/invitations/:inviteId/accept', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 Goals Tracker running on http://localhost:${PORT}`);
+const HOST = process.env.HOST || '0.0.0.0';
+app.listen(PORT, HOST, () => {
+  console.log(`🚀 Goals Tracker running on http://${HOST}:${PORT}`);
   console.log(`📊 Using ${db.type.toUpperCase()} database`);
 });

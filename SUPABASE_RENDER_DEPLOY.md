@@ -169,10 +169,11 @@ Your app is now:
 - Verify password is correct in connection string
 - Check Supabase project is active (not paused)
 
-### "App not loading"
-- Check Render service logs
-- Verify service is running (not sleeping)
-- Free tier spins down after 15 min - first request takes ~30 seconds
+### "App not loading" or "Application loading" for many minutes
+- **Check Render Logs:** Dashboard → your service → **Logs**. Look for errors (e.g. `DATABASE_URL` missing, connection timeout, crash).
+- **Env vars:** Ensure `DATABASE_TYPE`, `DATABASE_SSL`, and **`DATABASE_URL`** (Supabase connection string) are set. Wrong or missing `DATABASE_URL` can cause startup to hang or crash.
+- Free tier spins down after 15 min; first request after spin-down usually takes **30–90 seconds**. If it stays on "loading" for 5+ minutes, the service is likely crashing on startup—logs will show why.
+- **Health check:** After deploy, try `https://your-app.onrender.com/api/health`; it should return `{"ok":true}` quickly once the app is up.
 
 ### "Tables don't exist"
 - Tables are created automatically on first connection

@@ -170,7 +170,9 @@ if (dbType === 'postgres') {
     } catch (error) {
       console.error('❌ Database initialization error:', error.message);
     }
-  })();
+  })().catch(err => {
+    console.error('❌ Database init unhandled:', err);
+  });
   
 } else {
   // SQLite connection (for local development)
