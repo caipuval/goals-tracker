@@ -3425,8 +3425,8 @@ function showInvitationNotification(invitations) {
                 ${invite.competition_description ? `<div style="font-size: 13px; color: var(--text-secondary);">${invite.competition_description}</div>` : ''}
             </div>
             <div style="display: flex; gap: 8px;">
-                <button class="btn-primary" onclick="acceptInvitation(${invite.id})" style="flex: 1; padding: 10px;">Accept</button>
-                <button class="btn-secondary" onclick="declineInvitation(${invite.id})" style="flex: 1; padding: 10px;">Decline</button>
+                <button class="btn-primary" onclick="acceptInvitation(${invite.id}, this)" style="flex: 1; padding: 10px;">Accept</button>
+                <button class="btn-secondary" onclick="declineInvitation(${invite.id}, this)" style="flex: 1; padding: 10px;">Decline</button>
             </div>
         `;
         
@@ -3439,7 +3439,7 @@ window.openCompleteModal = openCompleteModal;
 window.deleteGoal = deleteGoal;
 window.deleteCompetitionLog = deleteCompetitionLog;
 window.deleteGoalCompletionFromCompetition = deleteGoalCompletionFromCompetition;
-window.acceptInvitation = async function(inviteId) {
+window.acceptInvitation = async function(inviteId, buttonEl) {
     try {
         const response = await fetch(`${API_URL}/api/competition/invitations/${inviteId}/accept`, {
             method: 'POST',
@@ -3452,8 +3452,9 @@ window.acceptInvitation = async function(inviteId) {
         if (data.success) {
             showSuccessModal('Invitation Accepted', 'You have successfully joined the competition!');
             // Remove notification
-            const notification = event.target.closest('.invitation-notification');
+            const notification = buttonEl?.closest ? buttonEl.closest('.invitation-notification') : null;
             if (notification) notification.remove();
+            await loadFriendsData();
             // Reload competition
             await loadCompetition();
         } else {
@@ -3465,8 +3466,8 @@ window.acceptInvitation = async function(inviteId) {
     }
 };
 
-window.declineInvitation = function(inviteId) {
-    // For now, just remove the notification
-    const notification = event.target.closest('.invitation-notification');
+window.declineInvitation = function(inviteId, buttonEl) {
+    // For now, just remove the notification (invite remains pending in DB)
+    const notification = buttonEl?.closest ? buttonEl.closest('.invitation-notification') : null;
     if (notification) notification.remove();
 };
