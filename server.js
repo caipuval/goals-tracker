@@ -699,7 +699,7 @@ async function calculateUserCompetitionTime(userId, competitionId, competitionTi
 // List all competitions (for competition boxes)
 app.get('/api/competitions', async (req, res) => {
   try {
-    const userId = parseInt(req.query.userId) || 0;
+    const userId = Number(parseInt(req.query.userId, 10)) || 0;
     // Only return competitions the user is "in": creator OR explicitly joined (has any log, even 0)
     const rows = await db.all(
       db.type === 'postgres'
@@ -737,21 +737,40 @@ app.get('/api/competitions', async (req, res) => {
       const allUserIds = new Set(allUserLogs.map(r => Number(r.user_id)));
       // Ensure creator is always included as a participant
       allUserIds.add(Number(c.creator_id));
+      const userTotals = {};
       let totalTime = 0;
       for (const uid of allUserIds) {
         const timeData = await calculateUserCompetitionTime(uid, competitionId, c.title);
-        totalTime += timeData.total;
+        const t = timeData.total;
+        userTotals[uid] = t;
+        totalTime += t;
       }
-      list.push({
+      const uidNum = Number(userId);
+      // Ensure current user's time is in totals (list only includes competitions they're in)
+      if (!(uidNum in userTotals) && !(userId in userTotals)) {
+        const timeData = await calculateUserCompetitionTime(uidNum, competitionId, c.title);
+        userTotals[uidNum] = timeData.total;
+      }
+      const userMinutes = userTotals[uidNum] ?? userTotals[userId] ?? 0;
+      const sortedTotals = Object.entries(userTotals).sort((a, b) => b[1] - a[1]);
+      const usersAbove = sortedTotals.filter(([, m]) => m > userMinutes).length;
+      const userRank = Math.max(1, usersAbove + 1);
+      const item = {
         id: c.id,
         title: c.title,
         description: c.description || '',
         totalTime,
         participantCount: allUserIds.size,
         hasUserJoined: true,
-        isCreator: Number(c.creator_id) === Number(userId)
-      });
+        isCreator: Number(c.creator_id) === Number(userId),
+        userRank: Number(userRank)
+      };
+      list.push(item);
     }
+    if (list.length > 0) {
+      console.log('[api/competitions] first item userRank:', list[0].userRank, 'userId:', userId);
+    }
+    res.setHeader('Cache-Control', 'no-store');
     res.json({ competitions: list });
   } catch (error) {
     console.error('List competitions error:', error);

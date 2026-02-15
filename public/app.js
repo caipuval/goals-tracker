@@ -2195,7 +2195,7 @@ async function loadCompetitionsList() {
             showCompetitionEmptyState({ clearSelection: true });
             return;
         }
-        const response = await fetch(`${API_URL}/api/competitions?userId=${currentUser.id}&_=${Date.now()}`);
+        const response = await fetch(`${API_URL}/api/competitions?userId=${currentUser.id}&_=${Date.now()}`, { cache: 'no-store' });
         const data = await response.json();
         const list = data.competitions || [];
         document.getElementById('competition-content')?.classList.remove('competition-empty');
@@ -2212,13 +2212,19 @@ async function loadCompetitionsList() {
             const isSelected = selectedId !== null && selectedId === Number(c.id);
             const roleLabel = (c.isCreator === true) ? 'Owner' : 'Member';
             const safeTitle = escapeHtml(c.title);
+            const rawRank = c.userRank ?? c.rank;
+            const placeNum = (rawRank != null && rawRank !== '' && Number(rawRank) >= 1) ? Number(rawRank) : null;
+            const placeText = placeNum != null ? `#${placeNum}` : '—';
             return `
             <div class="competition-box-wrap ${isSelected ? 'competition-box-wrap--selected' : ''}" data-competition-id="${c.id}" data-selected="${isSelected ? 'true' : 'false'}">
                 <button type="button" class="competition-box" aria-label="Open ${safeTitle} (${roleLabel})" aria-pressed="${isSelected ? 'true' : 'false'}">
                     <span class="competition-box__title">${safeTitle}</span>
                     ${c.description ? `<span class="competition-box__desc">${escapeHtml(c.description)}</span>` : ''}
                     <span class="competition-box__meta">${c.participantCount} participant${c.participantCount !== 1 ? 's' : ''} · ${formatTime(c.totalTime)} total</span>
-                    <span class="competition-box__badge">${roleLabel}</span>
+                    <span class="competition-box__badges">
+                        <span class="competition-box__place"><span class="competition-box__place-label">Your place:</span> <span class="competition-box__rank">${placeText}</span></span>
+                        <span class="competition-box__badge">${roleLabel}</span>
+                    </span>
                 </button>
                 ${c.isCreator ? `<button type="button" class="competition-box-edit" aria-label="Edit competition" title="Edit">✎</button>` : ''}
             </div>
