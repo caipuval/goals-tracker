@@ -139,6 +139,37 @@
                             <button id="close-details" class="btn-icon">✕</button>
                         </div>
                         <div id="day-goals-list"></div>
+                        <div id="day-note-section" class="day-note-section">
+                            <h4 class="day-note-title">Day note</h4>
+                            <p class="day-note-subtitle">Rate your productivity and mood</p>
+                            <div class="day-note-form">
+                                <label class="day-note-label">Notes</label>
+                                <textarea id="day-note-accomplishments" class="day-note-textarea" placeholder="Accomplishments, gratitude, reflections..." rows="4"></textarea>
+                                <div class="day-note-ratings">
+                                    <div class="day-note-rating-group">
+                                        <label class="day-note-label">Productivity</label>
+                                        <div class="day-note-stars" id="day-note-productivity" data-rating="0" aria-label="Rate productivity 1–5">
+                                            <button type="button" class="day-note-star" data-value="1" aria-label="1">★</button>
+                                            <button type="button" class="day-note-star" data-value="2" aria-label="2">★</button>
+                                            <button type="button" class="day-note-star" data-value="3" aria-label="3">★</button>
+                                            <button type="button" class="day-note-star" data-value="4" aria-label="4">★</button>
+                                            <button type="button" class="day-note-star" data-value="5" aria-label="5">★</button>
+                                        </div>
+                                    </div>
+                                    <div class="day-note-rating-group">
+                                        <label class="day-note-label">Mood</label>
+                                        <div class="day-note-mood" id="day-note-mood" data-rating="0" aria-label="Rate mood 1–5">
+                                            <button type="button" class="day-note-mood-btn" data-value="1" aria-label="Terrible">😢</button>
+                                            <button type="button" class="day-note-mood-btn" data-value="2" aria-label="Okay">😐</button>
+                                            <button type="button" class="day-note-mood-btn" data-value="3" aria-label="Good">🙂</button>
+                                            <button type="button" class="day-note-mood-btn" data-value="4" aria-label="Great">😊</button>
+                                            <button type="button" class="day-note-mood-btn" data-value="5" aria-label="Amazing">😄</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <button type="button" id="day-note-save" class="day-note-save-btn">Save day note</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 

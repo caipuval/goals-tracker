@@ -165,6 +165,22 @@ if (dbType === 'postgres') {
           PRIMARY KEY (user_id, friend_id)
         )
       `);
+
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS day_notes (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL,
+          note_date DATE NOT NULL,
+          accomplishments TEXT,
+          productivity_rating INTEGER CHECK(productivity_rating >= 1 AND productivity_rating <= 5),
+          mood_rating INTEGER CHECK(mood_rating >= 1 AND mood_rating <= 5),
+          notes TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+          UNIQUE(user_id, note_date)
+        )
+      `);
       
       console.log('✅ PostgreSQL database initialized');
     } catch (error) {
@@ -334,6 +350,22 @@ if (dbType === 'postgres') {
           PRIMARY KEY (user_id, friend_id),
           FOREIGN KEY (user_id) REFERENCES users(id),
           FOREIGN KEY (friend_id) REFERENCES users(id)
+        )
+      `);
+
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS day_notes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          note_date DATE NOT NULL,
+          accomplishments TEXT,
+          productivity_rating INTEGER CHECK(productivity_rating >= 1 AND productivity_rating <= 5),
+          mood_rating INTEGER CHECK(mood_rating >= 1 AND mood_rating <= 5),
+          notes TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id),
+          UNIQUE(user_id, note_date)
         )
       `);
       

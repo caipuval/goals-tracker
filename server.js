@@ -277,6 +277,97 @@ app.get('/api/progress/:userId', async (req, res) => {
   }
 });
 
+// Day notes (journal: accomplishments, productivity, mood per day)
+app.get('/api/day-notes', async (req, res) => {
+  try {
+    const userId = parseInt(req.query.userId, 10);
+    const date = req.query.date; // YYYY-MM-DD
+    if (!userId || !date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ success: false, error: 'userId and date (YYYY-MM-DD) required' });
+    }
+    const row = await db.get(
+      db.type === 'postgres'
+        ? 'SELECT id, note_date, accomplishments, productivity_rating, mood_rating, notes, created_at, updated_at FROM day_notes WHERE user_id = $1 AND note_date = $2'
+        : 'SELECT id, note_date, accomplishments, productivity_rating, mood_rating, notes, created_at, updated_at FROM day_notes WHERE user_id = ? AND note_date = ?',
+      [userId, date]
+    );
+    res.json({ note: row || null });
+  } catch (error) {
+    console.error('Get day note error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/day-notes/dates', async (req, res) => {
+  try {
+    const userId = parseInt(req.query.userId, 10);
+    const month = req.query.month; // YYYY-MM
+    if (!userId || !month || !/^\d{4}-\d{2}$/.test(month)) {
+      return res.status(400).json({ success: false, error: 'userId and month (YYYY-MM) required' });
+    }
+    const year = parseInt(month.slice(0, 4), 10);
+    const m = parseInt(month.slice(5, 7), 10);
+    const start = `${month}-01`;
+    const lastDay = new Date(year, m, 0);
+    const end = `${year}-${String(m).padStart(2, '0')}-${String(lastDay.getDate()).padStart(2, '0')}`;
+    const rows = await db.all(
+      db.type === 'postgres'
+        ? 'SELECT note_date FROM day_notes WHERE user_id = $1 AND note_date >= $2 AND note_date <= $3'
+        : 'SELECT note_date FROM day_notes WHERE user_id = ? AND note_date >= ? AND note_date <= ?',
+      [userId, start, end]
+    );
+    res.json({ dates: rows.map(r => r.note_date) });
+  } catch (error) {
+    console.error('Get day note dates error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/day-notes', async (req, res) => {
+  try {
+    const { userId, date, accomplishments, productivityRating, moodRating, notes } = req.body;
+    if (!userId || !date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ success: false, error: 'userId and date (YYYY-MM-DD) required' });
+    }
+    const uid = parseInt(userId, 10);
+    const prod = productivityRating != null && productivityRating !== '' ? Math.min(5, Math.max(1, parseInt(productivityRating, 10) || 0)) : null;
+    const mood = moodRating != null && moodRating !== '' ? Math.min(5, Math.max(1, parseInt(moodRating, 10) || 0)) : null;
+    const acc = accomplishments != null ? String(accomplishments).trim() : '';
+    const noteText = notes != null ? String(notes).trim() : '';
+
+    if (db.type === 'postgres') {
+      await db.run(
+        `INSERT INTO day_notes (user_id, note_date, accomplishments, productivity_rating, mood_rating, notes, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+         ON CONFLICT (user_id, note_date) DO UPDATE SET
+           accomplishments = EXCLUDED.accomplishments,
+           productivity_rating = EXCLUDED.productivity_rating,
+           mood_rating = EXCLUDED.mood_rating,
+           notes = EXCLUDED.notes,
+           updated_at = CURRENT_TIMESTAMP`,
+        [uid, date, acc, prod, mood, noteText]
+      );
+    } else {
+      const existing = await db.get('SELECT id FROM day_notes WHERE user_id = ? AND note_date = ?', [uid, date]);
+      if (existing) {
+        await db.run(
+          'UPDATE day_notes SET accomplishments = ?, productivity_rating = ?, mood_rating = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+          [acc, prod, mood, noteText, existing.id]
+        );
+      } else {
+        await db.run(
+          'INSERT INTO day_notes (user_id, note_date, accomplishments, productivity_rating, mood_rating, notes) VALUES (?, ?, ?, ?, ?, ?)',
+          [uid, date, acc, prod, mood, noteText]
+        );
+      }
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Save day note error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Get leaderboard
 app.get('/api/leaderboard', async (req, res) => {
   try {
@@ -328,9 +419,13 @@ app.delete('/api/goals/:goalId', async (req, res) => {
 async function areFriends(viewerId, profileUserId) {
   if (!viewerId || !profileUserId) return false;
   if (Number(viewerId) === Number(profileUserId)) return true;
+  const a = Number(viewerId);
+  const b = Number(profileUserId);
   const row = await db.get(
-    `SELECT 1 as ok FROM friendships WHERE user_id = ? AND friend_id = ? LIMIT 1`,
-    [viewerId, profileUserId]
+    db.type === 'postgres'
+      ? `SELECT 1 as ok FROM friendships WHERE (user_id = $1 AND friend_id = $2) OR (user_id = $2 AND friend_id = $1) LIMIT 1`
+      : `SELECT 1 as ok FROM friendships WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?) LIMIT 1`,
+    db.type === 'postgres' ? [a, b] : [a, b, b, a]
   );
   return !!row;
 }

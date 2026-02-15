@@ -7,6 +7,8 @@ let currentView = 'calendar';
 let currentMonth = new Date();
 let selectedDate = null;
 let contextDate = null; // The date selected in calendar that acts as "today" for other views
+let dayNoteDatesSet = new Set();
+let dayNoteDatesMonthKey = null;
 let allGoals = [];
 let currentFilter = 'all';
 let selectedFriendId = null;
@@ -66,6 +68,10 @@ function showApp() {
     contextDate = today;
     
     renderCalendar();
+    if (selectedDate) {
+        showDayDetails(selectedDate);
+        setTimeout(() => document.getElementById('day-details')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 100);
+    }
     loadLeaderboard();
     loadFriendsData();
 }
@@ -196,6 +202,30 @@ function setupEventListeners() {
         document.getElementById('day-details').style.display = 'none';
         // Keep the selected date highlighted; just hide the details panel.
     });
+
+    // Day note: star rating (productivity)
+    document.getElementById('day-note-productivity')?.addEventListener('click', (e) => {
+        const btn = e.target.closest('.day-note-star');
+        if (!btn) return;
+        const value = parseInt(btn.getAttribute('data-value'), 10);
+        const container = document.getElementById('day-note-productivity');
+        container.setAttribute('data-rating', value);
+        container.querySelectorAll('.day-note-star').forEach((b, i) => {
+            b.classList.toggle('active', i + 1 <= value);
+        });
+    });
+    // Day note: mood rating
+    document.getElementById('day-note-mood')?.addEventListener('click', (e) => {
+        const btn = e.target.closest('.day-note-mood-btn');
+        if (!btn) return;
+        const value = parseInt(btn.getAttribute('data-value'), 10);
+        const container = document.getElementById('day-note-mood');
+        container.setAttribute('data-rating', value);
+        container.querySelectorAll('.day-note-mood-btn').forEach((b, i) => {
+            b.classList.toggle('active', i + 1 <= value);
+        });
+    });
+    document.getElementById('day-note-save')?.addEventListener('click', saveDayNote);
 
     // Goal modal
     document.getElementById('new-goal-btn').addEventListener('click', () => {
@@ -557,6 +587,9 @@ function switchView(view) {
         loadCompetitionsList();
     } else if (view === 'friends') {
         loadFriendsData();
+    } else if (view === 'calendar' && selectedDate) {
+        showDayDetails(selectedDate);
+        setTimeout(() => document.getElementById('day-details')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 100);
     }
 }
 
@@ -605,6 +638,22 @@ function renderCalendar() {
         const date = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, day);
         calendar.appendChild(createDayElement(date, true));
     }
+    loadDayNoteDatesForCalendarMonth();
+}
+
+function loadDayNoteDatesForCalendarMonth() {
+    if (!currentUser?.id) return;
+    const key = currentMonth.getFullYear() + '-' + currentMonth.getMonth();
+    if (dayNoteDatesMonthKey === key) return;
+    const monthStr = currentMonth.getFullYear() + '-' + String(currentMonth.getMonth() + 1).padStart(2, '0');
+    fetch(`${API_URL}/api/day-notes/dates?userId=${currentUser.id}&month=${encodeURIComponent(monthStr)}`, { cache: 'no-store' })
+        .then(res => res.json())
+        .then(data => {
+            dayNoteDatesSet = new Set(data.dates || []);
+            dayNoteDatesMonthKey = key;
+            renderCalendar();
+        })
+        .catch(() => {});
 }
 
 function createDayElement(date, otherMonth) {
@@ -668,6 +717,12 @@ function createDayElement(date, otherMonth) {
             dayElement.appendChild(indicator);
         }
         // If there are goals but none completed and none failed (future dates or incomplete but not failed), show nothing
+    }
+    if (dayNoteDatesSet.has(dateStr)) {
+        const noteDot = document.createElement('div');
+        noteDot.className = 'calendar-day-note-dot';
+        noteDot.setAttribute('aria-label', 'Has day note');
+        dayElement.appendChild(noteDot);
     }
     
     dayElement.addEventListener('click', () => {
@@ -807,6 +862,83 @@ async function showDayDetails(date) {
     }
     
     document.getElementById('day-details').style.display = 'block';
+    loadDayNote(dateStr);
+}
+
+async function loadDayNote(dateStr) {
+    const accomplishmentsEl = document.getElementById('day-note-accomplishments');
+    const productivityEl = document.getElementById('day-note-productivity');
+    const moodEl = document.getElementById('day-note-mood');
+    if (!accomplishmentsEl || !currentUser?.id) return;
+    accomplishmentsEl.value = '';
+    productivityEl?.setAttribute('data-rating', '0');
+    moodEl?.setAttribute('data-rating', '0');
+    productivityEl?.querySelectorAll('.day-note-star').forEach(b => b.classList.remove('active'));
+    moodEl?.querySelectorAll('.day-note-mood-btn').forEach(b => b.classList.remove('active'));
+    try {
+        const res = await fetch(`${API_URL}/api/day-notes?userId=${currentUser.id}&date=${encodeURIComponent(dateStr)}`, { cache: 'no-store' });
+        const data = await res.json();
+        const note = data.note;
+        if (note) {
+            accomplishmentsEl.value = (note.accomplishments || '') + (note.notes ? (note.accomplishments ? '\n\n' : '') + note.notes : '');
+            const prod = note.productivity_rating != null ? Number(note.productivity_rating) : 0;
+            const mood = note.mood_rating != null ? Number(note.mood_rating) : 0;
+            if (productivityEl && prod >= 1 && prod <= 5) {
+                productivityEl.setAttribute('data-rating', String(prod));
+                productivityEl.querySelectorAll('.day-note-star').forEach((b, i) => b.classList.toggle('active', i + 1 <= prod));
+            }
+            if (moodEl && mood >= 1 && mood <= 5) {
+                moodEl.setAttribute('data-rating', String(mood));
+                moodEl.querySelectorAll('.day-note-mood-btn').forEach((b, i) => b.classList.toggle('active', i + 1 <= mood));
+            }
+        }
+    } catch (err) {
+        console.error('Load day note error:', err);
+    }
+}
+
+async function saveDayNote() {
+    if (!currentUser?.id || !selectedDate) return;
+    const dateStr = formatDate(selectedDate);
+    const notesContent = document.getElementById('day-note-accomplishments')?.value?.trim() || '';
+    const productivityEl = document.getElementById('day-note-productivity');
+    const moodEl = document.getElementById('day-note-mood');
+    const productivityRating = productivityEl ? parseInt(productivityEl.getAttribute('data-rating'), 10) || null : null;
+    const moodRating = moodEl ? parseInt(moodEl.getAttribute('data-rating'), 10) || null : null;
+    const saveBtn = document.getElementById('day-note-save');
+    try {
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving...';
+        const res = await fetch(`${API_URL}/api/day-notes`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                userId: currentUser.id,
+                date: dateStr,
+                accomplishments: notesContent,
+                productivityRating: productivityRating || undefined,
+                moodRating: moodRating || undefined,
+                notes: ''
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            saveBtn.textContent = 'Saved!';
+            setTimeout(() => {
+                saveBtn.textContent = 'Save day note';
+                saveBtn.disabled = false;
+            }, 2000);
+        } else {
+            saveBtn.textContent = 'Save day note';
+            saveBtn.disabled = false;
+            showErrorModal('Could not save', data.error || 'Please try again.');
+        }
+    } catch (err) {
+        console.error('Save day note error:', err);
+        saveBtn.textContent = 'Save day note';
+        saveBtn.disabled = false;
+        showErrorModal('Error', 'Could not save day note.');
+    }
 }
 
 function createGoalCard(goal, dateStr = null) {
@@ -3422,9 +3554,16 @@ async function loadFriendProfile(friendId, period) {
         qs.set('endDate', endDate);
     }
     const res = await fetch(`${API_URL}/api/users/${friendId}/summary?${qs.toString()}`);
-    const data = await res.json();
+    let data;
+    try {
+        data = await res.json();
+    } catch (_) {
+        showErrorModal('Error', 'Could not load friend profile.');
+        return;
+    }
     if (!res.ok || !data.success) {
-        showErrorModal('Error', data.error || 'Could not load friend profile.');
+        const msg = data.error || (res.status === 403 ? 'You are not friends with this user.' : res.status === 404 ? 'User not found.' : 'Could not load friend profile.');
+        showErrorModal('Error', msg);
         return;
     }
 
