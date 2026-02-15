@@ -739,7 +739,8 @@ app.get('/api/competitions', async (req, res) => {
 });
 
 // Get one competition by id (full details)
-app.get('/api/competition/:competitionId', async (req, res) => {
+// NOTE: constrain :competitionId to digits so it doesn't swallow routes like /api/competition/invitations
+app.get('/api/competition/:competitionId(\\d+)', async (req, res) => {
   try {
     const userId = parseInt(req.query.userId) || 0;
     const competitionId = parseInt(req.params.competitionId);
@@ -1112,7 +1113,7 @@ app.post('/api/competition', async (req, res) => {
 });
 
 // Update competition (creator only) - title, description (POST for broad compatibility)
-app.post('/api/competition/:competitionId/update', async (req, res) => {
+app.post('/api/competition/:competitionId(\\d+)/update', async (req, res) => {
   try {
     const competitionId = parseInt(req.params.competitionId);
     const body = req.body || {};
@@ -1250,7 +1251,7 @@ app.post('/api/competition/leave', async (req, res) => {
 });
 
 // Delete a competition (creator only)
-app.delete('/api/competition/:competitionId', async (req, res) => {
+app.delete('/api/competition/:competitionId(\\d+)', async (req, res) => {
   try {
     const competitionId = parseInt(req.params.competitionId);
     const { userId } = req.body || {};
@@ -1366,7 +1367,7 @@ app.post('/api/competition/remove', async (req, res) => {
 });
 
 // Get participant details (daily breakdown) - Uses SAME calculation as everything else
-app.get('/api/competition/:competitionId/participant/:userId', async (req, res) => {
+app.get('/api/competition/:competitionId(\\d+)/participant/:userId(\\d+)', async (req, res) => {
   try {
     const competitionId = parseInt(req.params.competitionId);
     const userId = parseInt(req.params.userId);
