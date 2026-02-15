@@ -15,20 +15,21 @@ let selectedFriendId = null;
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
-    // Remove any legacy top-right invitation popup container (from old builds)
     const legacy = document.getElementById('invitation-notifications');
     if (legacy) legacy.remove();
     checkAuth();
     setupEventListeners();
-    
-    // Check for pending invitations periodically
+    // Hash routing: #goals opens My Goals (for deep linking)
+    function applyHashView() {
+        const hash = (window.location.hash || '').replace(/^#/, '');
+        const valid = ['calendar', 'goals', 'statistics', 'leaderboard', 'friends', 'competition'];
+        if (valid.includes(hash) && currentUser) switchView(hash);
+    }
+    window.addEventListener('hashchange', applyHashView);
+    setTimeout(applyHashView, 500);
     setInterval(() => {
-        if (currentUser) {
-            checkPendingInvitations();
-        }
-    }, 30000); // Check every 30 seconds
-    
-    // Default goal date is set when opening the modal (based on selected calendar date)
+        if (currentUser) checkPendingInvitations();
+    }, 30000);
 });
 
 // Auth Functions
@@ -53,6 +54,9 @@ function showApp() {
     document.getElementById('username-display').textContent = currentUser.username;
     startClock();
     checkMidnightAutoFail();
+    const hash = (window.location.hash || '').replace(/^#/, '');
+    const validViews = ['calendar', 'goals', 'statistics', 'leaderboard', 'friends', 'competition'];
+    if (validViews.includes(hash)) switchView(hash);
     
     // Set both period selectors to "today" by default
     const goalsPeriod = document.getElementById('goals-period');
@@ -951,7 +955,8 @@ function createGoalCard(goal, dateStr = null) {
     }
     
     const progress = calculateGoalProgress(goal);
-    const hasDuration = goal.duration_minutes !== null && goal.duration_minutes !== undefined;
+    const targetMins = getGoalTargetMinutes(goal);
+    const hasDuration = targetMins > 0;
     const hasLoggedTime = progress.hasLoggedTime || false;
     const completion = goal.completions?.find(c => c.completion_date === dateStr);
     const isCompleted = !!completion;
@@ -965,12 +970,12 @@ function createGoalCard(goal, dateStr = null) {
     // Format duration display
     let durationDisplay = '';
     if (hasDuration) {
-        if (goal.duration_minutes >= 60) {
-            const hours = Math.floor(goal.duration_minutes / 60);
-            const mins = goal.duration_minutes % 60;
+        if (targetMins >= 60) {
+            const hours = Math.floor(targetMins / 60);
+            const mins = targetMins % 60;
             durationDisplay = mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
         } else {
-            durationDisplay = `${goal.duration_minutes}m`;
+            durationDisplay = `${targetMins}m`;
         }
     }
     
@@ -1033,10 +1038,10 @@ function createGoalCard(goal, dateStr = null) {
         
         <div class="goal-actions">
             ${dateStr ? 
-                `<button class="btn-complete ${isCompleted ? 'completed' : ''}" onclick="openCompleteModal(${goal.id}, '${dateStr}', ${goal.duration_minutes || 'null'}, ${completion ? completion.duration_minutes : 'null'})">
+                `<button class="btn-complete ${isCompleted ? 'completed' : ''}" onclick="openCompleteModal(${goal.id}, '${dateStr}', ${targetMins || 'null'}, ${completion ? completion.duration_minutes : 'null'})">
                     ${isCompleted ? `✓ Logged ${formatTime(completion.duration_minutes)}` : hasDuration ? `Log Time (Target: ${durationDisplay})` : 'Log Time'}
                 </button>` : 
-                `<button class="btn-complete ${isCompletedToday ? 'completed' : ''}" onclick="openCompleteModal(${goal.id}, '${effectiveDateStr}', ${goal.duration_minutes || 'null'}, ${effectiveCompletion ? effectiveCompletion.duration_minutes : 'null'})">
+                `<button class="btn-complete ${isCompletedToday ? 'completed' : ''}" onclick="openCompleteModal(${goal.id}, '${effectiveDateStr}', ${targetMins || 'null'}, ${effectiveCompletion ? effectiveCompletion.duration_minutes : 'null'})">
                     ${isCompletedToday ? `✓ Done - ${formatTime(effectiveCompletion.duration_minutes)}` : hasDuration ? `✓ Done (Target: ${durationDisplay})` : '✓ Done'}
                 </button>`
             }
@@ -1348,8 +1353,15 @@ function renderActivityChart(activities, canvasId = 'activity-chart') {
     }
 }
 
+function getGoalTargetMinutes(goal) {
+    const raw = goal.duration_minutes ?? goal.durationMinutes;
+    if (raw == null || raw === '') return 0;
+    const n = Number(raw);
+    return isNaN(n) ? 0 : n;
+}
+
 function calculateGoalProgress(goal) {
-    let totalMinutes = goal.duration_minutes || 0;
+    let totalMinutes = getGoalTargetMinutes(goal) || 0;
     let completedMinutes = 0;
     
     // Calculate total logged time from all completions
@@ -1362,7 +1374,7 @@ function calculateGoalProgress(goal) {
     }
     
     // If goal has no initial duration but has logged time, use logged time as total
-    if (!goal.duration_minutes && completedMinutes > 0) {
+    if (totalMinutes === 0 && completedMinutes > 0) {
         totalMinutes = completedMinutes; // Show total logged time
     }
     
@@ -1385,10 +1397,14 @@ async function loadGoals() {
         const goals = await response.json();
         console.log('Loaded goals:', goals);
 
-        // Normalize goal date fields coming from the API (Postgres may return ISO timestamps)
+        // Normalize goal date fields and duration (API may return snake_case or camelCase)
         goals.forEach(g => {
             g.start_date = normalizeToLocalYMD(g.start_date);
             g.end_date = g.end_date ? normalizeToLocalYMD(g.end_date) : null;
+            const raw = g.duration_minutes ?? g.durationMinutes;
+            const num = (raw != null && raw !== '') ? Number(raw) : null;
+            g.duration_minutes = num;
+            g.durationMinutes = num; // keep both so getGoalTargetMinutes(goal) always sees the same value
         });
         
         // Load completions for each goal
@@ -1439,19 +1455,22 @@ function renderGoalsList() {
     
     // Filter by time period: show goals whose *goal date* (start_date–end_date) overlaps the period
     const period = document.getElementById('goals-period')?.value || 'today';
+    // For "Today" use actual today so the total always matches goals due today
+    const periodRefDate = period === 'today' ? new Date() : effectiveDate;
     if (period !== 'all') {
-        const { startDate, endDate } = getStatisticsDates(period, effectiveDate);
+        const { startDate, endDate } = getStatisticsDates(period, periodRefDate);
         filteredGoals = filteredGoals.filter(goal => {
-            const goalStart = (goal.start_date || '').toString().trim().slice(0, 10);
-            const goalEnd = (goal.end_date || goal.start_date || '').toString().trim().slice(0, 10);
-            if (!goalStart) return false;
-            // Goal is in period if its date range overlaps [startDate, endDate]
+            const rawStart = goal.start_date != null ? goal.start_date : '';
+            const rawEnd = goal.end_date != null ? goal.end_date : rawStart;
+            const goalStart = (normalizeToLocalYMD(rawStart) || String(rawStart).trim().slice(0, 10) || '').slice(0, 10);
+            const goalEnd = (normalizeToLocalYMD(rawEnd) || String(rawEnd).trim().slice(0, 10) || goalStart || '').slice(0, 10) || goalStart;
+            if (!goalStart || goalStart.length < 10) return false;
             const goalInPeriod = goalStart <= endDate && goalEnd >= startDate;
             return goalInPeriod;
         });
     }
     
-    // Calculate total time logged and total target time for self-improvement counter
+    // Total = sum of targets of exactly the goals we are about to render (no separate logic)
     let totalTimeLogged = 0;
     let totalTargetMinutes = 0;
     
@@ -1461,8 +1480,8 @@ function renderGoalsList() {
         filteredGoals.forEach(goal => {
             const progress = calculateGoalProgress(goal);
             totalTimeLogged += progress.completed || 0;
-            const target = goal.duration_minutes != null && goal.duration_minutes !== '' ? Number(goal.duration_minutes) : 0;
-            if (target > 0) totalTargetMinutes += target;
+            // Sum the same "total" shown on each card (target minutes, or logged time if no target)
+            if (progress.total > 0) totalTargetMinutes += progress.total;
         });
     }
     
