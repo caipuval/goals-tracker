@@ -394,6 +394,14 @@ app.post('/api/friends/request', async (req, res) => {
     const uname = String(friendUsername || '').trim();
     if (!uid || !uname) return res.status(400).json({ success: false, error: 'User ID and username required' });
 
+    const requester = await db.get(`SELECT id FROM users WHERE id = ?`, [uid]);
+    if (!requester) {
+      return res.status(401).json({
+        success: false,
+        error: 'Your session is invalid or your account was removed. Please log out and log in again (or register again).'
+      });
+    }
+
     const target = await db.get(`SELECT id, username FROM users WHERE LOWER(username) = LOWER(?)`, [uname]);
     if (!target) return res.status(404).json({ success: false, error: 'User not found' });
     if (Number(target.id) === Number(uid)) return res.status(400).json({ success: false, error: 'You cannot add yourself.' });

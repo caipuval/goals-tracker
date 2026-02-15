@@ -3284,7 +3284,13 @@ async function sendFriendRequestFromUI() {
         });
         const data = await res.json();
         if (!res.ok || !data.success) {
-            showErrorModal('Could Not Add Friend', data.error || 'Please try again.');
+            const msg = data.error || 'Please try again.';
+            showErrorModal('Could Not Add Friend', msg);
+            if (res.status === 401 || /session is invalid|log out and log in/i.test(msg)) {
+                localStorage.removeItem('user');
+                currentUser = null;
+                setTimeout(() => showAuth(), 2000);
+            }
             return;
         }
         showSuccessModal('Friend Request', data.message || 'Request sent.');
