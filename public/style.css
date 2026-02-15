@@ -2255,6 +2255,12 @@ body {
     background: rgba(168, 85, 247, 0.26);
 }
 
+.btn-small.btn-small-danger {
+    background: rgba(239, 68, 68, 0.16);
+    border-color: rgba(239, 68, 68, 0.45);
+    color: #fca5a5;
+}
+
 .btn-small.btn-small-danger:hover {
     border-color: rgba(239, 68, 68, 0.65);
     color: #ef4444;

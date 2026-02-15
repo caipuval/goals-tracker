@@ -13,6 +13,9 @@ let selectedFriendId = null;
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
+    // Remove any legacy top-right invitation popup container (from old builds)
+    const legacy = document.getElementById('invitation-notifications');
+    if (legacy) legacy.remove();
     checkAuth();
     setupEventListeners();
     
