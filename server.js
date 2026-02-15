@@ -1724,6 +1724,35 @@ app.post('/api/competition/invitations/:inviteId/accept', async (req, res) => {
   }
 });
 
+// Decline invitation
+app.post('/api/competition/invitations/:inviteId/decline', async (req, res) => {
+  try {
+    const inviteId = parseInt(req.params.inviteId);
+    const { userId } = req.body;
+    
+    if (!userId) {
+      return res.status(400).json({ success: false, error: 'User ID required' });
+    }
+    
+    const invitation = await db.get(`
+      SELECT id FROM competition_invitations WHERE id = ? AND invitee_id = ?
+    `, [inviteId, userId]);
+    
+    if (!invitation) {
+      return res.status(404).json({ success: false, error: 'Invitation not found' });
+    }
+    
+    await db.run(`
+      UPDATE competition_invitations SET status = 'declined' WHERE id = ?
+    `, [inviteId]);
+    
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error declining invitation:', error);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 app.listen(PORT, HOST, () => {

@@ -3150,14 +3150,21 @@ function renderCompetitionInvites(invitations) {
                 <div class="friend-item__meta">Invited by ${escapeHtml(inv.inviter_username || '')}</div>
             </div>
             <div class="friend-item__actions">
-                <button class="btn-small btn-small-primary" data-invite-id="${inv.id}">Accept</button>
+                <button class="btn-small btn-small-primary" data-action="accept-invite" data-invite-id="${inv.id}">Accept</button>
+                <button class="btn-small btn-small-danger" data-action="decline-invite" data-invite-id="${inv.id}">Decline</button>
             </div>
         </div>
     `).join('');
-    el.querySelectorAll('button[data-invite-id]').forEach(btn => {
+    el.querySelectorAll('button[data-action="accept-invite"]').forEach(btn => {
         btn.addEventListener('click', async (e) => {
             e.stopPropagation();
             await acceptCompetitionInvite(parseInt(btn.dataset.inviteId));
+        });
+    });
+    el.querySelectorAll('button[data-action="decline-invite"]').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await declineCompetitionInvite(parseInt(btn.dataset.inviteId));
         });
     });
 }
@@ -3248,6 +3255,25 @@ async function acceptCompetitionInvite(inviteId) {
     } catch (err) {
         console.error('Error accepting invite:', err);
         showErrorModal('Error', 'Failed to accept invite.');
+    }
+}
+
+async function declineCompetitionInvite(inviteId) {
+    try {
+        const response = await fetch(`${API_URL}/api/competition/invitations/${inviteId}/decline`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: currentUser.id })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            showErrorModal('Error', data.error || 'Failed to decline invite.');
+            return;
+        }
+        await loadFriendsData();
+    } catch (err) {
+        console.error('Error declining invite:', err);
+        showErrorModal('Error', 'Failed to decline invite.');
     }
 }
 
@@ -3383,7 +3409,6 @@ async function checkPendingInvitations() {
         const data = await response.json();
         
         if (data.success && data.invitations && data.invitations.length > 0) {
-            showInvitationNotification(data.invitations);
             await loadFriendsData();
         }
     } catch (error) {
@@ -3391,83 +3416,8 @@ async function checkPendingInvitations() {
     }
 }
 
-function showInvitationNotification(invitations) {
-    // Create or get notification container
-    let notificationContainer = document.getElementById('invitation-notifications');
-    if (!notificationContainer) {
-        notificationContainer = document.createElement('div');
-        notificationContainer.id = 'invitation-notifications';
-        notificationContainer.style.cssText = 'position: fixed; top: 80px; right: 20px; z-index: 10000; max-width: 400px;';
-        document.body.appendChild(notificationContainer);
-    }
-    
-    notificationContainer.innerHTML = '';
-    
-    invitations.forEach(invite => {
-        const notification = document.createElement('div');
-        notification.className = 'invitation-notification';
-        notification.style.cssText = `
-            background: var(--bg-secondary);
-            border: 2px solid var(--accent);
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 12px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-        `;
-        
-        notification.innerHTML = `
-            <div style="margin-bottom: 12px;">
-                <strong style="color: var(--text-primary);">${invite.inviter_username}</strong> 
-                <span style="color: var(--text-secondary);">invited you to</span>
-            </div>
-            <div style="margin-bottom: 16px;">
-                <div style="font-weight: 600; color: var(--accent); margin-bottom: 4px;">${invite.competition_title}</div>
-                ${invite.competition_description ? `<div style="font-size: 13px; color: var(--text-secondary);">${invite.competition_description}</div>` : ''}
-            </div>
-            <div style="display: flex; gap: 8px;">
-                <button class="btn-primary" onclick="acceptInvitation(${invite.id}, this)" style="flex: 1; padding: 10px;">Accept</button>
-                <button class="btn-secondary" onclick="declineInvitation(${invite.id}, this)" style="flex: 1; padding: 10px;">Decline</button>
-            </div>
-        `;
-        
-        notificationContainer.appendChild(notification);
-    });
-}
-
 // Make functions globally accessible
 window.openCompleteModal = openCompleteModal;
 window.deleteGoal = deleteGoal;
 window.deleteCompetitionLog = deleteCompetitionLog;
 window.deleteGoalCompletionFromCompetition = deleteGoalCompletionFromCompetition;
-window.acceptInvitation = async function(inviteId, buttonEl) {
-    try {
-        const response = await fetch(`${API_URL}/api/competition/invitations/${inviteId}/accept`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: currentUser.id })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            showSuccessModal('Invitation Accepted', 'You have successfully joined the competition!');
-            // Remove notification
-            const notification = buttonEl?.closest ? buttonEl.closest('.invitation-notification') : null;
-            if (notification) notification.remove();
-            await loadFriendsData();
-            // Reload competition
-            await loadCompetition();
-        } else {
-            showErrorModal('Error Accepting Invitation', data.error || 'Failed to accept the invitation.');
-        }
-    } catch (error) {
-        console.error('Error accepting invitation:', error);
-        showErrorModal('Error', 'An error occurred while accepting the invitation. Please try again.');
-    }
-};
-
-window.declineInvitation = function(inviteId, buttonEl) {
-    // For now, just remove the notification (invite remains pending in DB)
-    const notification = buttonEl?.closest ? buttonEl.closest('.invitation-notification') : null;
-    if (notification) notification.remove();
-};
