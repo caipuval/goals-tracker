@@ -374,6 +374,13 @@ function setupEventListeners() {
     // Leave/Delete competition
     document.getElementById('leave-competition-btn')?.addEventListener('click', leaveCompetition);
     document.getElementById('delete-competition-btn')?.addEventListener('click', deleteCompetition);
+    // Close selected competition (clears selection)
+    document.getElementById('close-competition-detail')?.addEventListener('click', () => {
+        currentCompetition = null;
+        const detailEl = document.getElementById('competition-detail');
+        if (detailEl) detailEl.style.display = 'none';
+        updateCompetitionListSelection();
+    });
     // Invite to competition
     document.getElementById('invite-competition-btn')?.addEventListener('click', () => {
         if (!currentCompetition) {
@@ -1312,28 +1319,26 @@ function renderGoalsList() {
         });
     }
     
-    // Calculate total time logged for self-improvement counter
-    // Use the SAME logic as calculateGoalProgress - just sum completions from filtered goals
-    // This ensures consistency with what the goal cards display
+    // Calculate total time logged and total target time for self-improvement counter
     let totalTimeLogged = 0;
+    let totalTargetMinutes = 0;
     
-    // Ensure allGoals exists and is an array
     if (!allGoals || !Array.isArray(allGoals)) {
         console.warn('Self Improvement: allGoals is not loaded yet');
     } else {
-        // For the selected period, sum completions from goals that are shown in the filtered list
-        // Use the same filteredGoals that are displayed, so the counter matches what's visible
         filteredGoals.forEach(goal => {
-            // Use calculateGoalProgress to get the total - this is what the goal cards use
             const progress = calculateGoalProgress(goal);
             totalTimeLogged += progress.completed || 0;
+            const target = goal.duration_minutes != null && goal.duration_minutes !== '' ? Number(goal.duration_minutes) : 0;
+            if (target > 0) totalTargetMinutes += target;
         });
-        
-        console.log('Self Improvement: Calculated', totalTimeLogged, 'minutes from', filteredGoals.length, 'goals');
     }
     
-    // Create self-improvement counter
     const periodText = period !== 'all' ? document.getElementById('goals-period').selectedOptions[0].text : 'All Time';
+    const loggedStr = formatTime(totalTimeLogged);
+    const targetStr = totalTargetMinutes > 0 ? formatTime(totalTargetMinutes) : '';
+    const timeDisplay = targetStr ? `${loggedStr} / ${targetStr}` : loggedStr;
+    
     const counterHTML = `
         <div class="self-improvement-counter">
             <div class="counter-icon" aria-hidden="true">
@@ -1347,7 +1352,7 @@ function renderGoalsList() {
             </div>
             <div class="counter-content">
                 <div class="counter-label">Self Improvement</div>
-                <div class="counter-time">${formatTime(totalTimeLogged)}</div>
+                <div class="counter-time">${timeDisplay}</div>
                 <div class="counter-period">${periodText}</div>
             </div>
         </div>
@@ -2166,7 +2171,7 @@ function drawChart(labels, values) {
 // Competition Functions
 let currentCompetition = null;
 
-function showCompetitionEmptyState() {
+function showCompetitionEmptyState({ clearSelection = false } = {}) {
     const contentEl = document.getElementById('competition-content');
     const noEl = document.getElementById('no-competition');
     const listEl = document.getElementById('competition-list');
@@ -2175,7 +2180,10 @@ function showCompetitionEmptyState() {
     if (noEl) noEl.style.display = 'block';
     if (listEl) listEl.style.display = 'none';
     if (detailEl) detailEl.style.display = 'none';
-    currentCompetition = null;
+    if (clearSelection) {
+        currentCompetition = null;
+        updateCompetitionListSelection();
+    }
 }
 
 async function loadCompetitionsList() {
@@ -2184,7 +2192,7 @@ async function loadCompetitionsList() {
     const detailEl = document.getElementById('competition-detail');
     try {
         if (!currentUser || !currentUser.id) {
-            showCompetitionEmptyState();
+            showCompetitionEmptyState({ clearSelection: true });
             return;
         }
         const response = await fetch(`${API_URL}/api/competitions?userId=${currentUser.id}&_=${Date.now()}`);
@@ -2195,30 +2203,45 @@ async function loadCompetitionsList() {
         listEl.style.display = 'none';
         detailEl.style.display = 'none';
         if (list.length === 0) {
-            showCompetitionEmptyState();
+            showCompetitionEmptyState({ clearSelection: true });
             return;
         }
         listEl.style.display = 'grid';
-        listEl.innerHTML = list.map(c => `
-            <div class="competition-box-wrap" data-competition-id="${c.id}">
-                <button type="button" class="competition-box" aria-label="Open ${escapeHtml(c.title)}">
-                    <span class="competition-box__title">${escapeHtml(c.title)}</span>
+        const selectedId = currentCompetition?.id != null ? Number(currentCompetition.id) : null;
+        listEl.innerHTML = list.map(c => {
+            const isSelected = selectedId !== null && selectedId === Number(c.id);
+            const roleLabel = (c.isCreator === true) ? 'Owner' : 'Member';
+            const safeTitle = escapeHtml(c.title);
+            return `
+            <div class="competition-box-wrap ${isSelected ? 'competition-box-wrap--selected' : ''}" data-competition-id="${c.id}" data-selected="${isSelected ? 'true' : 'false'}">
+                <button type="button" class="competition-box" aria-label="Open ${safeTitle} (${roleLabel})" aria-pressed="${isSelected ? 'true' : 'false'}">
+                    <span class="competition-box__title">${safeTitle}</span>
                     ${c.description ? `<span class="competition-box__desc">${escapeHtml(c.description)}</span>` : ''}
                     <span class="competition-box__meta">${c.participantCount} participant${c.participantCount !== 1 ? 's' : ''} · ${formatTime(c.totalTime)} total</span>
-                    ${c.isCreator ? '<span class="competition-box__badge">Owner</span>' : ''}
+                    <span class="competition-box__badge">${roleLabel}</span>
                 </button>
                 ${c.isCreator ? `<button type="button" class="competition-box-edit" aria-label="Edit competition" title="Edit">✎</button>` : ''}
             </div>
-        `).join('');
+        `;
+        }).join('');
         listEl.querySelectorAll('.competition-box-wrap').forEach(wrap => {
-            const id = parseInt(wrap.dataset.competitionId);
-            wrap.querySelector('.competition-box')?.addEventListener('click', () => selectCompetition(id));
+            const idRaw = wrap.getAttribute('data-competition-id');
+            const id = idRaw != null ? parseInt(idRaw, 10) : null;
+            if (id == null || isNaN(id)) return;
+            wrap.querySelector('.competition-box')?.addEventListener('click', (e) => {
+                selectCompetition(id);
+                setCompetitionCardSelected(wrap);
+            });
             wrap.querySelector('.competition-box-edit')?.addEventListener('click', (e) => { e.stopPropagation(); openEditCompetitionModal(id); });
         });
+        if (selectedId != null) {
+            loadCompetitionById(selectedId);
+        }
         checkPendingInvitations();
     } catch (error) {
         console.error('Error loading competitions list:', error);
-        showCompetitionEmptyState();
+        // Don't wipe the user's selection just because the list failed to load.
+        showCompetitionEmptyState({ clearSelection: false });
     }
 }
 
@@ -2233,6 +2256,77 @@ function selectCompetition(id) {
     loadCompetitionById(id);
 }
 
+var ACCENT_PURPLE = '#a855f7';
+
+/** Set the given wrap as the selected card (purple outline). Call after click or when restoring selection. */
+function setCompetitionCardSelected(selectedWrap) {
+    const listEl = document.getElementById('competition-list');
+    if (!listEl) return;
+    listEl.querySelectorAll('.competition-box-wrap').forEach(wrap => {
+        const selected = wrap === selectedWrap;
+        wrap.classList.toggle('competition-box-wrap--selected', selected);
+        wrap.setAttribute('data-selected', selected ? 'true' : 'false');
+        const btn = wrap.querySelector('.competition-box');
+        if (btn) {
+            if (selected) {
+                btn.style.setProperty('border', '1px solid ' + ACCENT_PURPLE, 'important');
+                btn.style.setProperty('box-shadow', '0 0 0 1px ' + ACCENT_PURPLE, 'important');
+                wrap.style.setProperty('outline', '1px solid ' + ACCENT_PURPLE, 'important');
+                wrap.style.setProperty('outline-offset', '1px', 'important');
+                btn.setAttribute('aria-pressed', 'true');
+            } else {
+                btn.style.removeProperty('border');
+                btn.style.removeProperty('box-shadow');
+                wrap.style.removeProperty('outline');
+                wrap.style.removeProperty('outline-offset');
+                btn.setAttribute('aria-pressed', 'false');
+            }
+        }
+    });
+}
+
+function updateCompetitionListSelection() {
+    const listEl = document.getElementById('competition-list');
+    if (!listEl) return;
+    const rawId = currentCompetition?.id;
+    const selectedId = rawId !== undefined && rawId !== null ? Number(rawId) : null;
+    if (selectedId === null || isNaN(selectedId)) {
+        listEl.querySelectorAll('.competition-box-wrap').forEach(wrap => {
+            wrap.classList.remove('competition-box-wrap--selected');
+            wrap.setAttribute('data-selected', 'false');
+            const btn = wrap.querySelector('.competition-box');
+            if (btn) {
+                btn.style.removeProperty('border');
+                btn.style.removeProperty('box-shadow');
+                btn.setAttribute('aria-pressed', 'false');
+            }
+            wrap.style.removeProperty('outline'); wrap.style.removeProperty('outline-offset');
+        });
+        return;
+    }
+    listEl.querySelectorAll('.competition-box-wrap').forEach(wrap => {
+        const idRaw = wrap.getAttribute('data-competition-id');
+        const id = idRaw != null ? parseInt(idRaw, 10) : NaN;
+        const isSelected = !isNaN(id) && id === selectedId;
+        wrap.classList.toggle('competition-box-wrap--selected', isSelected);
+        wrap.setAttribute('data-selected', isSelected ? 'true' : 'false');
+        const btn = wrap.querySelector('.competition-box');
+        if (btn) {
+            if (isSelected) {
+                btn.style.setProperty('border', '1px solid ' + ACCENT_PURPLE, 'important');
+                btn.style.setProperty('box-shadow', '0 0 0 1px ' + ACCENT_PURPLE, 'important');
+                wrap.style.setProperty('outline', '1px solid ' + ACCENT_PURPLE, 'important');
+                wrap.style.setProperty('outline-offset', '1px', 'important');
+                btn.setAttribute('aria-pressed', 'true');
+            } else {
+                btn.style.removeProperty('border'); btn.style.removeProperty('box-shadow');
+                wrap.style.removeProperty('outline'); wrap.style.removeProperty('outline-offset');
+                btn.setAttribute('aria-pressed', 'false');
+            }
+        }
+    });
+}
+
 async function loadCompetitionById(competitionId) {
     try {
         const response = await fetch(`${API_URL}/api/competition/${competitionId}?userId=${currentUser.id}&_=${Date.now()}`);
@@ -2240,9 +2334,11 @@ async function loadCompetitionById(competitionId) {
         if (!data.competition) {
             document.getElementById('competition-detail').style.display = 'none';
             currentCompetition = null;
+            updateCompetitionListSelection();
             return;
         }
         currentCompetition = data.competition;
+        updateCompetitionListSelection();
         const detailEl = document.getElementById('competition-detail');
         detailEl.style.display = 'block';
         document.getElementById('competition-title').textContent = data.competition.title;
@@ -3334,16 +3430,26 @@ async function loadFriendProfile(friendId, period) {
 
     const topEl = document.getElementById('friend-top-goals');
     const dateGoals = Array.isArray(data.dateGoals) ? data.dateGoals : [];
+    if (topEl) topEl.setAttribute('role', 'list');
     topEl.innerHTML = dateGoals.length
-        ? dateGoals.map(g => `
-            <div class="friends-top-goal friends-date-goal">
+        ? dateGoals.map(g => {
+            const targetMins = (g.targetMinutes != null && g.targetMinutes !== '') ? Number(g.targetMinutes) : null;
+            const hasTarget = targetMins != null && targetMins > 0;
+            const targetStr = hasTarget ? formatTime(targetMins) : '';
+            const loggedStr = g.completed ? formatTime(Number(g.totalMinutes || 0)) : '0m';
+            const timeTargetStr = hasTarget ? `${loggedStr} / ${targetStr}` : (g.completed ? loggedStr : '');
+            const statusText = g.completed ? 'Done' : 'Not done';
+            const aria = `${g.title || ''} — ${statusText}${timeTargetStr ? ` — ${timeTargetStr}` : ''}`;
+            return `
+            <div class="friends-top-goal friends-date-goal" role="listitem" aria-label="${escapeHtml(aria)}">
                 <div class="friends-top-goal__title">${escapeHtml(g.title || '')}</div>
                 <div class="friends-top-goal__right">
-                    <span class="friends-date-goal__status ${g.completed ? 'friends-date-goal__status--done' : 'friends-date-goal__status--not-done'}">${g.completed ? 'Done' : 'Not done'}</span>
-                    ${g.completed ? `<span class="friends-top-goal__time">${formatTime(Number(g.totalMinutes || 0))}</span>` : ''}
+                    ${timeTargetStr ? `<span class="friends-top-goal__time">${timeTargetStr}</span>` : (g.completed ? `<span class="friends-top-goal__time">${loggedStr}</span>` : '')}
+                    <span class="friends-date-goal__status ${g.completed ? 'friends-date-goal__status--done' : 'friends-date-goal__status--not-done'}">${statusText}</span>
                 </div>
             </div>
-        `).join('')
+        `;
+        }).join('')
         : `<div class="friend-item"><div class="friend-item__left"><div class="friend-item__meta">No goals in this period.</div></div></div>`;
 }
 

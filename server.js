@@ -534,11 +534,11 @@ app.get('/api/users/:profileUserId/summary', async (req, res) => {
       ? [startDate, endDate, profileUserId, ...goalRangeParams]
       : [profileUserId, ...goalRangeParams];
     const dateGoals = await db.all(
-      `SELECT g.id, g.title, COALESCE(SUM(gc.duration_minutes), 0) as total_minutes
+      `SELECT g.id, g.title, g.duration_minutes as target_minutes, COALESCE(SUM(gc.duration_minutes), 0) as total_minutes
        FROM goals g
        ${dateGoalsJoin}
        WHERE g.user_id = ? ${goalRangeFilter}
-       GROUP BY g.id
+       GROUP BY g.id, g.title, g.duration_minutes
        ORDER BY LOWER(g.title) ASC`,
       dateGoalsParams
     );
@@ -567,12 +567,16 @@ app.get('/api/users/:profileUserId/summary', async (req, res) => {
         activity: r.activity,
         minutes: Number(r.minutes || 0)
       })),
-      dateGoals: dateGoals.map(g => ({
-        id: g.id,
-        title: g.title,
-        completed: Number(g.total_minutes || 0) > 0,
-        totalMinutes: Number(g.total_minutes || 0)
-      }))
+      dateGoals: dateGoals.map(g => {
+        const rawTarget = g.target_minutes ?? g.targetMinutes;
+        return {
+          id: g.id,
+          title: g.title,
+          completed: Number(g.total_minutes || 0) > 0,
+          totalMinutes: Number(g.total_minutes || 0),
+          targetMinutes: rawTarget != null && rawTarget !== '' ? Number(rawTarget) : null
+        };
+      })
     });
   } catch (error) {
     console.error('Error fetching user summary:', error);
