@@ -843,6 +843,30 @@ app.get('/api/users/:profileUserId/summary', async (req, res) => {
       };
     });
 
+    // Aggregate activity by goal title so same name (e.g. multiple "SMMA" goals) shows as one in pie chart
+    const rawActivity = (Array.isArray(activityRows) ? activityRows : []).map(r => {
+      const rawTarget = r.target_minutes ?? r.targetMinutes;
+      return {
+        id: r.id,
+        activity: (r.activity || r.title || '').trim(),
+        minutes: Number(r.minutes || 0),
+        targetMinutes: rawTarget != null && rawTarget !== '' ? Number(rawTarget) : null
+      };
+    });
+    const byName = {};
+    rawActivity.forEach(r => {
+      const name = r.activity || 'Untitled';
+      const key = name.toLowerCase();
+      if (!byName[key]) {
+        byName[key] = { id: r.id, activity: name, minutes: 0, targetMinutes: null };
+      }
+      byName[key].minutes += r.minutes;
+      if (r.targetMinutes != null && r.targetMinutes > 0) {
+        byName[key].targetMinutes = (byName[key].targetMinutes || 0) + r.targetMinutes;
+      }
+    });
+    const activity = Object.values(byName).sort((a, b) => b.minutes - a.minutes || (a.activity || '').localeCompare(b.activity || ''));
+
     res.json({
       success: true,
       user,
@@ -852,15 +876,7 @@ app.get('/api/users/:profileUserId/summary', async (req, res) => {
         totalMinutes: Number(timeRow?.total_minutes || 0),
         last7DaysMinutes: Number(last7?.minutes || 0)
       },
-      activity: (Array.isArray(activityRows) ? activityRows : []).map(r => {
-        const rawTarget = r.target_minutes ?? r.targetMinutes;
-        return {
-          id: r.id,
-          activity: r.activity || r.title || '',
-          minutes: Number(r.minutes || 0),
-          targetMinutes: rawTarget != null && rawTarget !== '' ? Number(rawTarget) : null
-        };
-      }),
+      activity,
       dateGoals: dateGoals
     });
   } catch (error) {
@@ -965,6 +981,40 @@ async function calculateUserCompetitionTime(userId, competitionId, competitionTi
     goalCompletions
   };
 }
+
+// Get current user's total time for a "Self Improvement" competition (if any) — for syncing My Goals box
+app.get('/api/competitions/self-improvement-time', async (req, res) => {
+  try {
+    const userId = Number(parseInt(req.query.userId, 10)) || 0;
+    if (!userId) return res.json({ success: true, totalMinutes: 0, hasCompetition: false });
+    const competition = await db.get(
+      db.type === 'postgres'
+        ? `SELECT id, creator_id, title FROM competitions WHERE LOWER(TRIM(title)) = $1 LIMIT 1`
+        : `SELECT id, creator_id, title FROM competitions WHERE LOWER(TRIM(title)) = ? LIMIT 1`,
+      ['self improvement']
+    );
+    if (!competition) return res.json({ success: true, totalMinutes: 0, hasCompetition: false });
+    const isCreator = Number(competition.creator_id) === Number(userId);
+    if (!isCreator) {
+      const joined = await db.get(
+        db.type === 'postgres'
+          ? `SELECT 1 as ok FROM competition_logs WHERE competition_id = $1 AND user_id = $2 LIMIT 1`
+          : `SELECT 1 as ok FROM competition_logs WHERE competition_id = ? AND user_id = ? LIMIT 1`,
+        [competition.id, userId]
+      );
+      if (!joined) return res.json({ success: true, totalMinutes: 0, hasCompetition: false });
+    }
+    const timeData = await calculateUserCompetitionTime(userId, competition.id, competition.title);
+    res.json({
+      success: true,
+      totalMinutes: timeData.total,
+      hasCompetition: true
+    });
+  } catch (error) {
+    console.error('Self improvement time error:', error);
+    res.status(500).json({ success: false, totalMinutes: 0, hasCompetition: false });
+  }
+});
 
 // List all competitions (for competition boxes)
 app.get('/api/competitions', async (req, res) => {
