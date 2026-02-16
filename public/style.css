@@ -20,11 +20,16 @@
     --shadow: rgba(0, 0, 0, 0.5);
 }
 
+html {
+    overflow-x: hidden;
+}
+
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
     background: var(--bg-primary);
     color: var(--text-primary);
     overflow-x: hidden;
+    max-width: 100vw;
 }
 
 /* Screen Management */
@@ -424,7 +429,9 @@ body {
 /* Main Container */
 .main-container {
     display: flex;
+    min-width: 0;
     height: calc(100vh - 88px);
+    overflow: hidden;
 }
 
 /* Sidebar */
@@ -509,13 +516,17 @@ body {
 /* Content */
 .content {
     flex: 1;
+    min-width: 0;
     padding: 40px 64px;
     overflow-y: auto;
+    overflow-x: hidden;
     max-width: 100%;
 }
 
 .view {
     display: none;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .view.active {
@@ -2242,24 +2253,36 @@ body {
     color: #ef4444;
 }
 
-/* Friends View */
+/* Friends View – single column on all devices */
 .friends-content {
     display: flex;
-    gap: 22px;
-    align-items: flex-start;
+    flex-direction: column;
+    gap: 24px;
+    align-items: stretch;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .friends-left {
-    flex: 0 0 420px;
-    width: 420px;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 18px;
 }
 
 .friends-right {
-    flex: 1;
+    width: 100%;
+    max-width: 100%;
     min-width: 0;
+    overflow-x: hidden;
+}
+
+.friends-right-panel {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
 }
 
 .friends-sidebar-panel {
@@ -2277,8 +2300,8 @@ body {
 
 .friends-sidebar-header h3 {
     margin: 0;
-    font-size: 18px;
-    font-weight: 900;
+    font-size: 26px;
+    font-weight: 800;
     letter-spacing: 0.2px;
     color: var(--text-primary);
 }
@@ -2404,12 +2427,25 @@ body {
     cursor: pointer;
 }
 
-.friend-item:hover {
+.friend-item[role="button"]:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.friend-item:hover,
+.friend-item.selected {
     border-color: var(--accent);
     box-shadow:
         0 0 0 1px rgba(168, 85, 247, 0.18),
         0 10px 24px rgba(0, 0, 0, 0.30);
+}
+
+.friend-item:hover {
     transform: translateY(-1px);
+}
+
+.friend-item.selected {
+    background: rgba(168, 85, 247, 0.12);
 }
 
 .friend-item__left {
@@ -2475,6 +2511,8 @@ body {
 }
 
 .friends-right-panel {
+    min-width: 0;
+    overflow-x: hidden;
     background:
         radial-gradient(1200px 700px at 20% 0%, rgba(168, 85, 247, 0.20) 0%, rgba(168, 85, 247, 0.00) 58%),
         linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(0, 0, 0, 0.10) 100%),
@@ -2508,6 +2546,7 @@ body {
     display: flex;
     flex-direction: column;
     gap: 18px;
+    min-width: 0;
 }
 
 .friends-hero {
@@ -2602,9 +2641,10 @@ body {
 
 .friends-breakdown-grid {
     display: grid;
-    grid-template-columns: 1.15fr 0.85fr;
+    grid-template-columns: 1fr;
     gap: 22px;
     align-items: start;
+    min-width: 0;
 }
 
 .friends-breakdown #friend-activity-stats.is-empty {
@@ -2662,15 +2702,22 @@ body {
     color: var(--accent);
     font-weight: 600;
     flex-shrink: 0;
-    min-width: 4.5em;
+    min-width: 7em;
     text-align: right;
+    line-height: 28px;
+    min-height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
 }
 
 .friends-top-goal__right {
     display: flex;
     align-items: center;
+    justify-content: flex-end;
     gap: 12px;
     flex-shrink: 0;
+    min-width: 0;
     margin-left: auto;
 }
 
@@ -2679,6 +2726,8 @@ body {
     font-weight: 600;
     padding: 4px 8px;
     border-radius: 8px;
+    min-width: 5.5rem;
+    text-align: center;
 }
 
 .friends-date-goal__status--done {
@@ -2691,12 +2740,163 @@ body {
     color: var(--text-secondary);
 }
 
-@media (max-width: 900px) {
+/* Friends: stack left (list) and right (profile) panels early – single column from 1200px down */
+@media (max-width: 1200px) {
     .friends-content {
         flex-direction: column;
+        gap: 20px;
     }
     .friends-left {
         width: 100%;
-        flex: 1 1 auto;
+        max-width: 100%;
+        flex: 0 0 auto;
+        min-width: 0;
     }
+    .friends-right {
+        width: 100%;
+        flex: 0 0 auto;
+        min-width: 0;
+    }
+    .friends-right-panel {
+        width: 100%;
+    }
+    .friends-breakdown-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Responsive: prevent overflow on all viewports */
+@media (max-width: 1200px) {
+    .content {
+        padding: 32px 24px;
+    }
+}
+
+@media (max-width: 768px) {
+    .content {
+        padding: 20px 16px;
+    }
+    #friends-content {
+        padding: 0;
+    }
+    .friends-sidebar-panel,
+    .friends-right-panel {
+        padding: 16px;
+        border-radius: 16px;
+    }
+    .friends-detail-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .friends-period-select {
+        width: 100%;
+        max-width: 100%;
+    }
+}
+
+@media (max-width: 600px) {
+    .app-header {
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 12px 16px;
+    }
+    .header-clock {
+        position: static;
+        transform: none;
+        width: 100%;
+        justify-content: center;
+    }
+    .friends-left {
+        flex: 0 0 auto;
+    }
+    .friends-breakdown-grid {
+        grid-template-columns: 1fr;
+    }
+    .friend-activity-chart-container {
+        min-height: 200px;
+    }
+    .stats-overview {
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+    }
+    .view-header {
+        margin-bottom: 24px;
+        padding-bottom: 16px;
+    }
+}
+
+@media (max-width: 420px) {
+    .stats-overview {
+        grid-template-columns: 1fr;
+    }
+    .leaderboard-item {
+        flex-wrap: wrap;
+    }
+    .leaderboard-score {
+        width: 100%;
+        margin-top: 8px;
+        text-align: left;
+    }
+}
+
+/* Ensure no horizontal scroll anywhere */
+#friends-view .view-inner,
+#goals-view .view-inner,
+#statistics-view .view-inner,
+.view-inner {
+    min-width: 0;
+    max-width: 100%;
+}
+
+/* Profile view */
+#profile-view .profile-content {
+    max-width: 480px;
+    padding: 24px 0;
+}
+.profile-form .form-group {
+    margin-bottom: 20px;
+}
+.profile-form .form-group label {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+.profile-form .form-group input {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(0, 0, 0, 0.2);
+    color: var(--text-primary);
+    font-size: 15px;
+}
+.profile-form .form-group input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.25);
+}
+.profile-section-divider {
+    margin: 28px 0 16px 0;
+    padding-top: 24px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.profile-section-divider h3 {
+    margin: 0 0 4px 0;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+.profile-hint {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-secondary);
+    opacity: 0.9;
+}
+.profile-form #profile-save-btn {
+    margin-top: 8px;
+}
+.profile-message {
+    margin-top: 16px;
+    font-size: 14px;
 }

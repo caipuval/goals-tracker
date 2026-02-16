@@ -111,6 +111,10 @@
                     <span class="icon">⚔️</span>
                     <span>Competition</span>
                 </button>
+                <button class="nav-item" data-view="profile">
+                    <span class="icon">👤</span>
+                    <span>Profile</span>
+                </button>
                 <div class="sidebar-actions">
                     <button id="new-goal-btn" class="btn-primary btn-block">
                         <span>+ New Goal</span>
@@ -217,6 +221,10 @@
                             <div class="stat-card">
                                 <div class="stat-label">Active Goals</div>
                                 <div class="stat-value" id="active-goals-stat">0</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-label">Days Failed</div>
+                                <div class="stat-value" id="days-failed-stat">0</div>
                             </div>
                         </div>
                         <div class="stats-breakdown">
@@ -416,6 +424,43 @@
                                 <div id="competition-leaderboard-list"></div>
                             </div>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Profile View -->
+                <div id="profile-view" class="view">
+                    <div class="view-header">
+                        <h2>Profile</h2>
+                    </div>
+                    <div class="profile-content">
+                        <form id="profile-form" class="profile-form">
+                            <div class="form-group">
+                                <label for="profile-email">Email</label>
+                                <input type="email" id="profile-email" name="email" placeholder="your@email.com" autocomplete="email">
+                            </div>
+                            <div class="form-group">
+                                <label for="profile-username">Username</label>
+                                <input type="text" id="profile-username" name="username" placeholder="Username" autocomplete="username" minlength="2">
+                            </div>
+                            <div class="profile-section-divider">
+                                <h3>Change password</h3>
+                                <p class="profile-hint">Leave blank to keep your current password.</p>
+                            </div>
+                            <div class="form-group">
+                                <label for="profile-current-password">Current password</label>
+                                <input type="password" id="profile-current-password" name="currentPassword" placeholder="Required only to change password" autocomplete="current-password">
+                            </div>
+                            <div class="form-group">
+                                <label for="profile-new-password">New password</label>
+                                <input type="password" id="profile-new-password" name="newPassword" placeholder="At least 6 characters" autocomplete="new-password" minlength="6">
+                            </div>
+                            <div class="form-group">
+                                <label for="profile-confirm-password">Confirm new password</label>
+                                <input type="password" id="profile-confirm-password" name="confirmPassword" placeholder="Repeat new password" autocomplete="new-password">
+                            </div>
+                            <button type="submit" id="profile-save-btn" class="btn-primary">Save changes</button>
+                            <p id="profile-message" class="profile-message" style="display: none;"></p>
+                        </form>
                     </div>
                 </div>
             </div>

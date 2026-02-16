@@ -22,7 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Hash routing: #goals opens My Goals (for deep linking)
     function applyHashView() {
         const hash = (window.location.hash || '').replace(/^#/, '');
-        const valid = ['calendar', 'goals', 'statistics', 'leaderboard', 'friends', 'competition'];
+        const valid = ['calendar', 'goals', 'statistics', 'leaderboard', 'friends', 'competition', 'profile'];
         if (valid.includes(hash) && currentUser) switchView(hash);
     }
     window.addEventListener('hashchange', applyHashView);
@@ -55,7 +55,7 @@ function showApp() {
     startClock();
     checkMidnightAutoFail();
     const hash = (window.location.hash || '').replace(/^#/, '');
-    const validViews = ['calendar', 'goals', 'statistics', 'leaderboard', 'friends', 'competition'];
+    const validViews = ['calendar', 'goals', 'statistics', 'leaderboard', 'friends', 'competition', 'profile'];
     if (validViews.includes(hash)) switchView(hash);
     
     // Set both period selectors to "today" by default
@@ -346,6 +346,10 @@ function setupEventListeners() {
     // Leaderboard period
     document.getElementById('leaderboard-period').addEventListener('change', loadLeaderboard);
 
+    // Profile form
+    const profileForm = document.getElementById('profile-form');
+    if (profileForm) profileForm.addEventListener('submit', handleProfileSubmit);
+
     // Statistics period - sync with goals period
     document.getElementById('statistics-period').addEventListener('change', (e) => {
         const period = e.target.value;
@@ -591,6 +595,8 @@ function switchView(view) {
         loadCompetitionsList();
     } else if (view === 'friends') {
         loadFriendsData();
+    } else if (view === 'profile') {
+        loadProfile();
     } else if (view === 'calendar' && selectedDate) {
         showDayDetails(selectedDate);
         setTimeout(() => document.getElementById('day-details')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 100);
@@ -965,7 +971,11 @@ function createGoalCard(goal, dateStr = null) {
     const effectiveDate = contextDate || new Date();
     const effectiveDateStr = dateStr || formatDate(effectiveDate);
     const effectiveCompletion = goal.completions?.find(c => c.completion_date === effectiveDateStr);
-    const isCompletedToday = !!effectiveCompletion;
+    const hasCompletionToday = !!effectiveCompletion;
+    // Only treat as "done" (green/completed style) when 100%+ or no target with any time
+    const isCompletedToday = hasDuration
+        ? (progress.percentage >= 100)
+        : hasCompletionToday;
     
     // Format duration display
     let durationDisplay = '';
@@ -1011,7 +1021,7 @@ function createGoalCard(goal, dateStr = null) {
     card.innerHTML = `
         <div class="goal-card-header">
             <div>
-                <div class="goal-card-title">${goal.title}</div>
+                <div class="goal-card-title">${escapeHtml(capitalizeTitle(goal.title || ''))}</div>
                 ${goal.description ? `<div class="goal-card-description">${goal.description}</div>` : ''}
                 <div class="goal-card-dates">
                     ${dueLabel ? `<span class="goal-date-info">${dueLabel}</span>` : ''}
@@ -1042,7 +1052,7 @@ function createGoalCard(goal, dateStr = null) {
                     ${isCompleted ? `✓ Logged ${formatTime(completion.duration_minutes)}` : hasDuration ? `Log Time (Target: ${durationDisplay})` : 'Log Time'}
                 </button>` : 
                 `<button class="btn-complete ${isCompletedToday ? 'completed' : ''}" onclick="openCompleteModal(${goal.id}, '${effectiveDateStr}', ${targetMins || 'null'}, ${effectiveCompletion ? effectiveCompletion.duration_minutes : 'null'})">
-                    ${isCompletedToday ? `✓ Done - ${formatTime(effectiveCompletion.duration_minutes)}` : hasDuration ? `✓ Done (Target: ${durationDisplay})` : '✓ Done'}
+                    ${isCompletedToday ? `✓ Done - ${formatTime(effectiveCompletion.duration_minutes)}` : hasCompletionToday && hasDuration ? `✓ Done - ${formatTime(effectiveCompletion.duration_minutes)}` : hasDuration ? `✓ Done (Target: ${durationDisplay})` : '✓ Done'}
                 </button>`
             }
             <button class="btn-delete" onclick="deleteGoal(${goal.id})">Delete</button>
@@ -1161,7 +1171,20 @@ function shouldGoalBeCompletedToday(goal, today) {
     return false;
 }
 
-// Activity Chart Function
+// Activity Chart Function – distinct colors per segment (works on dark background)
+const CHART_COLORS = [
+    '#a855f7', // violet
+    '#0ea5e9', // sky blue
+    '#10b981', // emerald
+    '#f59e0b', // amber
+    '#ef4444', // red
+    '#ec4899', // pink
+    '#6366f1', // indigo
+    '#14b8a6', // teal
+    '#f97316', // orange
+    '#8b5cf6'  // purple
+];
+
 function renderActivityChart(activities, canvasId = 'activity-chart') {
     const canvas = document.getElementById(canvasId);
     if (!canvas || activities.length === 0) {
@@ -1189,48 +1212,69 @@ function renderActivityChart(activities, canvasId = 'activity-chart') {
         return sum + mins;
     }, 0);
     if (total === 0) return;
-    let currentAngle = -Math.PI / 2; // Start from top
-    
-    // Different purple shades for each segment
-    const purpleShades = [
-        '#a855f7', // Main accent purple
-        '#9333ea', // Darker purple
-        '#c084fc', // Lighter purple
-        '#7c3aed', // Deep purple
-        '#d8b4fe', // Very light purple
-        '#8b5cf6', // Medium purple
-        '#a78bfa', // Soft purple
-        '#9d4edd', // Vibrant purple
-        '#e9d5ff', // Pale purple
-        '#6d28d9'  // Rich purple
-    ];
-    const purpleColors = purpleShades;
-    
+
+    const segmentColors = CHART_COLORS;
     const centerX = width / 2;
     const centerY = height / 2;
     const radius = Math.min(width, height) / 2 - 50;
     const donutRadius = radius * 0.55; // Inner radius for donut chart
-    
+
+    // When only one item has time: draw full donut in one color (avoids empty-looking chart)
+    const hasPositiveMinutes = activities.filter(([_, m]) => (typeof m === 'number' ? m : Number(m) || 0) > 0);
+    if (hasPositiveMinutes.length === 1 && total > 0) {
+        const [activity, minutes] = hasPositiveMinutes[0];
+        const minutesNum = typeof minutes === 'number' ? minutes : Number(minutes) || 0;
+        const baseColor = segmentColors[0];
+        const gradient = ctx.createLinearGradient(centerX - radius, centerY, centerX + radius, centerY);
+        gradient.addColorStop(0, baseColor + 'CC');
+        gradient.addColorStop(0.5, baseColor);
+        gradient.addColorStop(1, baseColor + '99');
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+        ctx.arc(centerX, centerY, donutRadius, 2 * Math.PI, 0, true);
+        ctx.closePath();
+        ctx.shadowColor = baseColor + '80';
+        ctx.shadowBlur = 15;
+        ctx.fillStyle = gradient;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        // Center circle
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, donutRadius, 0, 2 * Math.PI);
+        ctx.fillStyle = '#141414';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(168, 85, 247, 0.3)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Total', centerX, centerY - 6);
+        ctx.fillStyle = '#a855f7';
+        ctx.font = '18px sans-serif';
+        ctx.fillText(formatTime(total), centerX, centerY + 14);
+    } else {
+    let currentAngle = -Math.PI / 2; // Start from top
+
     // Draw donut chart with different purple shades
     activities.forEach(([activity, minutes], index) => {
         const minutesNum = typeof minutes === 'number' ? minutes : Number(minutes) || 0;
         const sliceAngle = (minutesNum / total) * 2 * Math.PI;
-        const baseColor = purpleShades[index % purpleShades.length];
+        const baseColor = segmentColors[index % segmentColors.length];
         
-        // Create gradient for each slice with different purple shade
+        // Gradient for this slice (lighter to base)
         const gradient = ctx.createLinearGradient(
             centerX + Math.cos(currentAngle) * radius,
             centerY + Math.sin(currentAngle) * radius,
             centerX + Math.cos(currentAngle + sliceAngle) * radius,
             centerY + Math.sin(currentAngle + sliceAngle) * radius
         );
-        
-        // Use the base color with slight variation for gradient
-        const lighterShade = purpleShades[index % purpleShades.length];
-        const darkerShade = purpleShades[(index + 1) % purpleShades.length];
-        gradient.addColorStop(0, lighterShade + 'CC'); // Slightly transparent
+        gradient.addColorStop(0, baseColor + 'CC');
         gradient.addColorStop(0.5, baseColor);
-        gradient.addColorStop(1, darkerShade + 'DD');
+        gradient.addColorStop(1, baseColor + '99');
         
         // Draw outer arc
         ctx.beginPath();
@@ -1318,6 +1362,7 @@ function renderActivityChart(activities, canvasId = 'activity-chart') {
     ctx.fillStyle = '#a855f7';
     ctx.font = '18px sans-serif';
     ctx.fillText(formatTime(total), centerX, centerY + 14);
+    }
     }, 100);
     
     // Create HTML legend below chart
@@ -1335,7 +1380,7 @@ function renderActivityChart(activities, canvasId = 'activity-chart') {
         
         activities.forEach(([activity, minutes], index) => {
             const minutesNum = typeof minutes === 'number' ? minutes : Number(minutes) || 0;
-            const color = purpleColors[index % purpleColors.length];
+            const color = CHART_COLORS[index % CHART_COLORS.length];
             
             const legendItem = document.createElement('div');
             legendItem.className = 'activity-legend-item';
@@ -1654,7 +1699,7 @@ function openCompleteModal(goalId, date, targetDuration, existingDuration) {
     console.log('Final actualDuration:', actualDuration);
     console.log('=== END DEBUG ===');
     
-    document.getElementById('complete-goal-title').textContent = goal.title;
+    document.getElementById('complete-goal-title').textContent = capitalizeTitle(goal.title || '');
     
     const timeSpentGroup = document.getElementById('time-spent-group');
     const timeHint = document.getElementById('time-hint');
@@ -1842,8 +1887,16 @@ function getLeaderboardDates(period) {
 function renderLeaderboard(leaderboard) {
     const list = document.getElementById('leaderboard-list');
     list.innerHTML = '';
+
+    // Rank by total time first, then goals completed (in case server sends different order)
+    const sorted = [...(leaderboard || [])].sort((a, b) => {
+        const timeA = Number(a.total_minutes) || 0;
+        const timeB = Number(b.total_minutes) || 0;
+        if (timeB !== timeA) return timeB - timeA;
+        return (Number(b.goals_completed) || 0) - (Number(a.goals_completed) || 0);
+    });
     
-    if (leaderboard.length === 0) {
+    if (sorted.length === 0) {
         list.innerHTML = `
             <div class="empty-state">
                 <div class="empty-state-icon">🏆</div>
@@ -1854,7 +1907,7 @@ function renderLeaderboard(leaderboard) {
         return;
     }
     
-    leaderboard.forEach((user, index) => {
+    sorted.forEach((user, index) => {
         const item = document.createElement('div');
         item.className = 'leaderboard-item';
         
@@ -1873,11 +1926,98 @@ function renderLeaderboard(leaderboard) {
                     ${user.goals_completed} goals completed · ${user.total_minutes} minutes
                 </div>
             </div>
-            <div class="leaderboard-score">${user.total_minutes}m</div>
+            <div class="leaderboard-score">${formatTime(user.total_minutes)}</div>
         `;
         
         list.appendChild(item);
     });
+}
+
+// Profile
+async function loadProfile() {
+    if (!currentUser?.id) return;
+    const emailEl = document.getElementById('profile-email');
+    const usernameEl = document.getElementById('profile-username');
+    const currentPasswordEl = document.getElementById('profile-current-password');
+    const newPasswordEl = document.getElementById('profile-new-password');
+    const confirmPasswordEl = document.getElementById('profile-confirm-password');
+    const msgEl = document.getElementById('profile-message');
+    if (msgEl) { msgEl.style.display = 'none'; msgEl.textContent = ''; }
+    if (currentPasswordEl) currentPasswordEl.value = '';
+    if (newPasswordEl) newPasswordEl.value = '';
+    if (confirmPasswordEl) confirmPasswordEl.value = '';
+    try {
+        const res = await fetch(`${API_URL}/api/profile?userId=${currentUser.id}`);
+        const data = await res.json();
+        if (data.success && data.user) {
+            if (emailEl) emailEl.value = data.user.email || '';
+            if (usernameEl) usernameEl.value = data.user.username || '';
+        } else {
+            if (emailEl) emailEl.value = currentUser.email || '';
+            if (usernameEl) usernameEl.value = currentUser.username || '';
+        }
+    } catch (_) {
+        if (emailEl) emailEl.value = currentUser.email || '';
+        if (usernameEl) usernameEl.value = currentUser.username || '';
+    }
+}
+
+async function handleProfileSubmit(e) {
+    e.preventDefault();
+    if (!currentUser?.id) return;
+    const emailEl = document.getElementById('profile-email');
+    const usernameEl = document.getElementById('profile-username');
+    const currentPasswordEl = document.getElementById('profile-current-password');
+    const newPasswordEl = document.getElementById('profile-new-password');
+    const confirmPasswordEl = document.getElementById('profile-confirm-password');
+    const saveBtn = document.getElementById('profile-save-btn');
+    const msgEl = document.getElementById('profile-message');
+    const email = emailEl?.value?.trim() || '';
+    const username = usernameEl?.value?.trim() || '';
+    const newPassword = newPasswordEl?.value || '';
+    const confirmPassword = confirmPasswordEl?.value || '';
+    if (newPassword && newPassword !== confirmPassword) {
+        if (msgEl) { msgEl.style.display = 'block'; msgEl.textContent = 'New password and confirmation do not match.'; msgEl.style.color = 'var(--error, #ef4444)'; }
+        return;
+    }
+    if (newPassword && newPassword.length < 6) {
+        if (msgEl) { msgEl.style.display = 'block'; msgEl.textContent = 'New password must be at least 6 characters.'; msgEl.style.color = 'var(--error, #ef4444)'; }
+        return;
+    }
+    if (saveBtn) saveBtn.disabled = true;
+    if (msgEl) msgEl.style.display = 'none';
+    try {
+        const body = { userId: currentUser.id };
+        if (email) body.email = email;
+        if (username) body.username = username;
+        if (newPassword) {
+            body.currentPassword = currentPasswordEl?.value || '';
+            body.newPassword = newPassword;
+        }
+        const res = await fetch(`${API_URL}/api/profile`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (data.success) {
+            if (data.user) {
+                currentUser.email = data.user.email;
+                currentUser.username = data.user.username;
+                localStorage.setItem('user', JSON.stringify(currentUser));
+                document.getElementById('username-display').textContent = currentUser.username;
+            }
+            if (msgEl) { msgEl.style.display = 'block'; msgEl.textContent = data.message || 'Profile updated.'; msgEl.style.color = 'var(--text-secondary)'; }
+            if (newPasswordEl) newPasswordEl.value = '';
+            if (confirmPasswordEl) confirmPasswordEl.value = '';
+            if (currentPasswordEl) currentPasswordEl.value = '';
+        } else {
+            if (msgEl) { msgEl.style.display = 'block'; msgEl.textContent = data.error || 'Update failed.'; msgEl.style.color = 'var(--error, #ef4444)'; }
+        }
+    } catch (err) {
+        if (msgEl) { msgEl.style.display = 'block'; msgEl.textContent = err.message || 'Could not update profile.'; msgEl.style.color = 'var(--error, #ef4444)'; }
+    }
+    if (saveBtn) saveBtn.disabled = false;
 }
 
 // Helper Functions
@@ -1956,6 +2096,17 @@ async function loadStatistics() {
         document.getElementById('total-time-stat').textContent = formatTime(totalMinutes);
         document.getElementById('goals-completed-stat').textContent = goalsCompleted;
         document.getElementById('active-goals-stat').textContent = progress.length;
+
+        // Days failed (days in period with active goals but 0 minutes logged)
+        try {
+            const failedRes = await fetch(`${API_URL}/api/stats/days-failed?userId=${currentUser.id}&startDate=${startDate}&endDate=${endDate}`);
+            const failedData = await failedRes.json();
+            const daysFailedEl = document.getElementById('days-failed-stat');
+            if (daysFailedEl) daysFailedEl.textContent = (failedData.success && typeof failedData.daysFailed === 'number') ? failedData.daysFailed : '0';
+        } catch (_) {
+            const daysFailedEl = document.getElementById('days-failed-stat');
+            if (daysFailedEl) daysFailedEl.textContent = '0';
+        }
         
         // Render activity breakdown
         renderActivityStats(activityStats);
@@ -2406,6 +2557,13 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+function capitalizeTitle(s) {
+    if (s == null || typeof s !== 'string') return '';
+    const t = s.trim();
+    if (!t.length) return t;
+    return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
 function selectCompetition(id) {
@@ -3337,7 +3495,7 @@ function renderFriendsList(friends) {
         return;
     }
     el.innerHTML = friends.map(f => `
-        <div class="friend-item" role="button" data-friend-id="${f.id}">
+        <div class="friend-item ${Number(selectedFriendId) === Number(f.id) ? 'selected' : ''}" role="button" data-friend-id="${f.id}">
             <div class="friend-item__left">
                 <div class="friend-item__name">${escapeHtml(f.username || '')}</div>
                 <div class="friend-item__meta">View profile</div>
@@ -3540,20 +3698,29 @@ async function declineCompetitionInvite(inviteId) {
 }
 
 async function openFriendProfile(friendId) {
+    selectedFriendId = friendId;
+    const friendEmpty = document.getElementById('friend-empty');
+    const friendDetail = document.getElementById('friend-detail');
+    if (friendEmpty) friendEmpty.style.display = 'none';
+    if (friendDetail) friendDetail.style.display = 'block';
+    const select = document.getElementById('friend-period');
+    const period = select?.value || 'today';
     try {
-        selectedFriendId = friendId;
-        document.getElementById('friend-empty').style.display = 'none';
-        document.getElementById('friend-detail').style.display = 'block';
-        const select = document.getElementById('friend-period');
-        const period = select?.value || 'week';
         await loadFriendProfile(friendId, period);
     } catch (err) {
         console.error('Error opening friend profile:', err);
-        showErrorModal('Error', 'Could not load friend profile.');
+        if (selectedFriendId === friendId) {
+            const msg = (err && err.message) ? err.message : 'Could not load friend profile.';
+            showErrorModal('Error', msg);
+        }
     }
 }
 
 async function loadFriendProfile(friendId, period) {
+    if (!currentUser?.id) {
+        if (selectedFriendId === friendId) showErrorModal('Error', 'Please log in to view friend profiles.');
+        return;
+    }
     const periodLabels = {
         today: 'Today',
         yesterday: 'Yesterday',
@@ -3563,64 +3730,131 @@ async function loadFriendProfile(friendId, period) {
         year: 'This year',
         all: 'All time'
     };
-    const { startDate, endDate } = period === 'all' ? { startDate: null, endDate: null } : getStatisticsDates(period, contextDate || new Date());
+    const refDate = period === 'today' || period === 'yesterday' ? new Date() : (contextDate || new Date());
+    const { startDate, endDate } = period === 'all' ? { startDate: null, endDate: null } : getStatisticsDates(period, refDate);
+    const viewerIdNum = currentUser.id != null ? parseInt(String(currentUser.id), 10) : 0;
+    if (!viewerIdNum || Number.isNaN(viewerIdNum)) {
+        if (selectedFriendId === friendId) showErrorModal('Error', 'Please log in again to view friend profiles.');
+        return;
+    }
     const qs = new URLSearchParams({
-        viewerId: String(currentUser.id),
+        viewerId: String(viewerIdNum),
         _: String(Date.now())
     });
     if (startDate && endDate) {
         qs.set('startDate', startDate);
         qs.set('endDate', endDate);
     }
-    const res = await fetch(`${API_URL}/api/users/${friendId}/summary?${qs.toString()}`);
+    const url = `${API_URL}/api/users/${friendId}/summary?${qs.toString()}`;
+    let res;
+    let responseText;
+    try {
+        res = await fetch(url);
+        responseText = await res.text();
+    } catch (fetchErr) {
+        console.error('Friend profile fetch failed:', fetchErr);
+        if (selectedFriendId === friendId) {
+            showErrorModal('Error', (fetchErr && fetchErr.message) ? fetchErr.message : 'Network error. Could not load friend profile.');
+        }
+        return;
+    }
     let data;
     try {
-        data = await res.json();
+        data = responseText ? JSON.parse(responseText) : {};
     } catch (_) {
-        showErrorModal('Error', 'Could not load friend profile.');
+        console.error('Friend profile: invalid JSON', { status: res.status, url, body: responseText.slice(0, 200) });
+        if (selectedFriendId === friendId) {
+            showErrorModal('Error', 'Could not load friend profile. Server returned an invalid response.');
+        }
         return;
     }
     if (!res.ok || !data.success) {
-        const msg = data.error || (res.status === 403 ? 'You are not friends with this user.' : res.status === 404 ? 'User not found.' : 'Could not load friend profile.');
-        showErrorModal('Error', msg);
+        if (selectedFriendId === friendId) {
+            const serverMsg = (data && data.error) ? data.error : (res.status === 403 ? 'You are not friends with this user.' : res.status === 404 ? 'User not found.' : 'Could not load friend profile.');
+            const msg = res.status ? `(${res.status}) ${serverMsg}` : serverMsg;
+            console.warn('Friend profile error:', { status: res.status, friendId, viewerId: viewerIdNum, error: data && data.error });
+            showErrorModal('Error', msg);
+        }
         return;
     }
 
-    const totalMins = Number(data.stats?.totalMinutes || 0);
-    document.getElementById('friend-detail-name').textContent = data.user.username;
-    document.getElementById('friend-detail-subtitle').textContent = `${periodLabels[period] || 'Summary'}: ${formatTime(totalMins)}`;
-    document.getElementById('friend-total-time').textContent = formatTime(totalMins);
-    document.getElementById('friend-total-goals').textContent = String(Number(data.stats?.totalGoals || 0));
-    document.getElementById('friend-active-goals').textContent = String(Number(data.stats?.activeGoals || 0));
+    // Ignore stale response if user switched to another friend
+    if (selectedFriendId !== friendId) return;
 
-    const dateGoalsTitle = document.getElementById('friend-date-goals-title');
-    if (dateGoalsTitle) dateGoalsTitle.textContent = (periodLabels[period] || 'Summary') + "'s Goals";
+    try {
+        // Update which friend is marked selected in the list (purple highlight)
+        document.querySelectorAll('.friend-item[role="button"]').forEach(item => {
+            item.classList.toggle('selected', parseInt(item.dataset.friendId, 10) === friendId);
+        });
 
-    renderFriendActivityStats(Array.isArray(data.activity) ? data.activity : []);
+        const totalMins = Number(data.stats?.totalMinutes || 0);
+        const userName = (data.user && data.user.username) ? String(data.user.username) : 'Unknown';
+        const elName = document.getElementById('friend-detail-name');
+        const elSubtitle = document.getElementById('friend-detail-subtitle');
+        const elTotalTime = document.getElementById('friend-total-time');
+        const elTotalGoals = document.getElementById('friend-total-goals');
+        const elActiveGoals = document.getElementById('friend-active-goals');
+        if (elName) elName.textContent = userName;
+        if (elSubtitle) elSubtitle.textContent = `${periodLabels[period] || 'Summary'}: ${formatTime(totalMins)}`;
+        if (elTotalTime) elTotalTime.textContent = formatTime(totalMins);
+        if (elTotalGoals) elTotalGoals.textContent = String(Number(data.stats?.totalGoals || 0));
+        if (elActiveGoals) elActiveGoals.textContent = String(Number(data.stats?.activeGoals || 0));
 
-    const topEl = document.getElementById('friend-top-goals');
-    const dateGoals = Array.isArray(data.dateGoals) ? data.dateGoals : [];
-    if (topEl) topEl.setAttribute('role', 'list');
-    topEl.innerHTML = dateGoals.length
-        ? dateGoals.map(g => {
-            const targetMins = (g.targetMinutes != null && g.targetMinutes !== '') ? Number(g.targetMinutes) : null;
-            const hasTarget = targetMins != null && targetMins > 0;
-            const targetStr = hasTarget ? formatTime(targetMins) : '';
-            const loggedStr = g.completed ? formatTime(Number(g.totalMinutes || 0)) : '0m';
-            const timeTargetStr = hasTarget ? `${loggedStr} / ${targetStr}` : (g.completed ? loggedStr : '');
-            const statusText = g.completed ? 'Done' : 'Not done';
-            const aria = `${g.title || ''} — ${statusText}${timeTargetStr ? ` — ${timeTargetStr}` : ''}`;
-            return `
+        const dateGoalsTitle = document.getElementById('friend-date-goals-title');
+        if (dateGoalsTitle) dateGoalsTitle.textContent = (periodLabels[period] || 'Summary') + "'s Goals";
+
+        const activity = Array.isArray(data.activity) ? data.activity : [];
+        renderFriendActivityStats(activity);
+
+        const topEl = document.getElementById('friend-top-goals');
+    let dateGoals = Array.isArray(data.dateGoals) ? data.dateGoals : [];
+    if (dateGoals.length === 0 && activity.length > 0) {
+      dateGoals = activity.map(r => {
+        const total = Number(r.minutes || 0);
+        const target = r.targetMinutes != null && r.targetMinutes !== '' ? Number(r.targetMinutes) : null;
+        const hasTarget = target != null && target > 0;
+        const fullyDone = hasTarget ? total >= target : total > 0;
+        return {
+          id: r.id,
+          title: r.activity,
+          completed: fullyDone,
+          totalMinutes: total,
+          targetMinutes: target
+        };
+      });
+    }
+    if (topEl) {
+      topEl.setAttribute('role', 'list');
+      topEl.innerHTML = dateGoals.length
+          ? dateGoals.map(g => {
+              const targetMins = (g.targetMinutes != null && g.targetMinutes !== '') ? Number(g.targetMinutes) : null;
+              const hasTarget = targetMins != null && targetMins > 0;
+              const totalMins = Number(g.totalMinutes || 0);
+              const fullyDone = hasTarget ? totalMins >= targetMins : totalMins > 0;
+              const targetStr = hasTarget ? formatTime(targetMins) : '';
+              const loggedStr = totalMins > 0 ? formatTime(totalMins) : '0m';
+              const timeTargetStr = hasTarget ? `${loggedStr} / ${targetStr}` : (totalMins > 0 ? loggedStr : '');
+              const timeDisplay = timeTargetStr || '—';
+              const statusText = fullyDone ? 'Done' : 'Not done';
+              const aria = `${g.title || ''} — ${statusText} — ${timeDisplay}`;
+              return `
             <div class="friends-top-goal friends-date-goal" role="listitem" aria-label="${escapeHtml(aria)}">
-                <div class="friends-top-goal__title">${escapeHtml(g.title || '')}</div>
+                <div class="friends-top-goal__title">${escapeHtml(capitalizeTitle(g.title || ''))}</div>
                 <div class="friends-top-goal__right">
-                    ${timeTargetStr ? `<span class="friends-top-goal__time">${timeTargetStr}</span>` : (g.completed ? `<span class="friends-top-goal__time">${loggedStr}</span>` : '')}
-                    <span class="friends-date-goal__status ${g.completed ? 'friends-date-goal__status--done' : 'friends-date-goal__status--not-done'}">${statusText}</span>
+                    <span class="friends-top-goal__time">${escapeHtml(timeDisplay)}</span>
+                    <span class="friends-date-goal__status ${fullyDone ? 'friends-date-goal__status--done' : 'friends-date-goal__status--not-done'}">${statusText}</span>
                 </div>
             </div>
         `;
-        }).join('')
-        : `<div class="friend-item"><div class="friend-item__left"><div class="friend-item__meta">No goals in this period.</div></div></div>`;
+          }).join('')
+          : `<div class="friend-item"><div class="friend-item__left"><div class="friend-item__meta">No goals in this period.</div></div></div>`;
+    }
+    } catch (err) {
+        console.error('Friend profile render error:', err);
+        if (selectedFriendId === friendId) {
+            showErrorModal('Error', 'Could not display profile: ' + (err && err.message ? err.message : 'Unknown error'));
+        }
+    }
 }
 
 function renderFriendActivityStats(activityRows) {
@@ -3628,15 +3862,13 @@ function renderFriendActivityStats(activityRows) {
     if (!container) return;
     container.innerHTML = '';
 
-    const activityStats = {};
-    activityRows.forEach(r => {
-        const name = r.activity;
-        const mins = Number(r.minutes || 0);
-        if (!name) return;
-        activityStats[name] = (activityStats[name] || 0) + mins;
-    });
-
-    const activities = Object.entries(activityStats).filter(([_, mins]) => (Number(mins) || 0) > 0);
+    const activities = (Array.isArray(activityRows) ? activityRows : [])
+        .filter(r => r.activity && (Number(r.minutes || 0) > 0 || Number(r.targetMinutes || 0) > 0))
+        .map(r => ({
+            name: capitalizeTitle(r.activity || ''),
+            minutes: Number(r.minutes || 0),
+            targetMinutes: r.targetMinutes != null && r.targetMinutes !== '' ? Number(r.targetMinutes) : null
+        }));
     if (activities.length === 0) {
         container.classList.add('is-empty');
         container.innerHTML = `
@@ -3658,17 +3890,21 @@ function renderFriendActivityStats(activityRows) {
     }
 
     container.classList.remove('is-empty');
-    const maxMinutes = Math.max(...activities.map(([_, m]) => Number(m) || 0));
-    activities.sort((a, b) => (Number(b[1]) || 0) - (Number(a[1]) || 0));
-    activities.forEach(([activity, minutes]) => {
+    const maxMinutes = Math.max(...activities.map(a => Math.max(a.minutes, a.targetMinutes || 0)), 1);
+    activities.sort((a, b) => (b.minutes || 0) - (a.minutes || 0));
+    activities.forEach(({ name, minutes, targetMinutes }) => {
         const minutesNum = Number(minutes) || 0;
+        const targetNum = targetMinutes != null ? Number(targetMinutes) : null;
+        const timeDisplay = targetNum != null && targetNum > 0
+            ? `${formatTime(minutesNum)} / ${formatTime(targetNum)}`
+            : formatTime(minutesNum);
+        const percentage = maxMinutes > 0 ? (minutesNum / maxMinutes) * 100 : 0;
         const card = document.createElement('div');
         card.className = 'activity-stat-card';
-        const percentage = maxMinutes > 0 ? (minutesNum / maxMinutes) * 100 : 0;
         card.innerHTML = `
             <div class="activity-stat-header">
-                <span class="activity-name">${escapeHtml(activity)}</span>
-                <span class="activity-time">${formatTime(minutesNum)}</span>
+                <span class="activity-name">${escapeHtml(name)}</span>
+                <span class="activity-time">${timeDisplay}</span>
             </div>
             <div class="activity-stat-bar">
                 <div class="activity-stat-fill" style="width: ${percentage}%"></div>
@@ -3677,7 +3913,8 @@ function renderFriendActivityStats(activityRows) {
         container.appendChild(card);
     });
 
-    renderActivityChart(activities, 'friend-activity-chart');
+    const chartData = activities.map(a => [a.name, a.minutes]);
+    renderActivityChart(chartData, 'friend-activity-chart');
 }
 
 async function checkPendingInvitations() {

@@ -138,6 +138,84 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
+// Get current user profile (id, username, email - for profile tab)
+app.get('/api/profile', async (req, res) => {
+  try {
+    const userId = parseInt(req.query.userId, 10);
+    if (!userId) return res.status(400).json({ success: false, error: 'userId required' });
+    const user = await db.get(
+      db.type === 'postgres' ? 'SELECT id, username, email FROM users WHERE id = $1' : 'SELECT id, username, email FROM users WHERE id = ?',
+      [userId]
+    );
+    if (!user) return res.status(404).json({ success: false, error: 'User not found' });
+    res.json({ success: true, user: { id: user.id, username: user.username, email: user.email || '' } });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// Update profile (email, username, password)
+app.put('/api/profile', async (req, res) => {
+  try {
+    const { userId, email, username, currentPassword, newPassword } = req.body || {};
+    const uid = parseInt(userId, 10);
+    if (!uid) return res.status(400).json({ success: false, error: 'User ID required' });
+
+    const user = await db.get(
+      db.type === 'postgres' ? 'SELECT id, username, email, password FROM users WHERE id = $1' : 'SELECT id, username, email, password FROM users WHERE id = ?',
+      [uid]
+    );
+    if (!user) return res.status(404).json({ success: false, error: 'User not found' });
+
+    const updates = [];
+    const values = [];
+    let paramIndex = 1;
+
+    if (email != null && String(email).trim() !== '') {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) return res.status(400).json({ success: false, error: 'Invalid email format' });
+      updates.push(db.type === 'postgres' ? `email = $${paramIndex++}` : 'email = ?');
+      values.push(String(email).trim());
+    }
+    if (username != null && String(username).trim() !== '') {
+      const uname = String(username).trim();
+      if (uname.length < 2) return res.status(400).json({ success: false, error: 'Username must be at least 2 characters' });
+      updates.push(db.type === 'postgres' ? `username = $${paramIndex++}` : 'username = ?');
+      values.push(uname);
+    }
+    if (newPassword != null && String(newPassword).length > 0) {
+      if (String(newPassword).length < 6) return res.status(400).json({ success: false, error: 'New password must be at least 6 characters' });
+      if (!currentPassword || !(await bcrypt.compare(String(currentPassword), user.password))) {
+        return res.status(401).json({ success: false, error: 'Current password is incorrect' });
+      }
+      const hashed = await bcrypt.hash(String(newPassword), 10);
+      updates.push(db.type === 'postgres' ? `password = $${paramIndex++}` : 'password = ?');
+      values.push(hashed);
+    }
+
+    if (updates.length === 0) return res.json({ success: true, message: 'No changes' });
+
+    values.push(uid);
+    const setClause = updates.join(', ');
+    const whereParam = db.type === 'postgres' ? `$${paramIndex}` : '?';
+    await db.run(
+      `UPDATE users SET ${setClause} WHERE id = ${whereParam}`,
+      values
+    );
+    const updated = await db.get(
+      db.type === 'postgres' ? 'SELECT id, username, email FROM users WHERE id = $1' : 'SELECT id, username, email FROM users WHERE id = ?',
+      [uid]
+    );
+    res.json({ success: true, user: { id: updated.id, username: updated.username, email: updated.email || '' } });
+  } catch (error) {
+    if (error.message && (error.message.includes('UNIQUE') || error.message.includes('unique'))) {
+      if (error.message.includes('email')) return res.status(400).json({ success: false, error: 'Email already in use' });
+      if (error.message.includes('username')) return res.status(400).json({ success: false, error: 'Username already taken' });
+    }
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
 // Get all users (for leaderboard)
 app.get('/api/users', async (req, res) => {
   try {
@@ -277,6 +355,51 @@ app.get('/api/progress/:userId', async (req, res) => {
   }
 });
 
+// Days failed: count of days in range where user had active goals but logged 0 minutes that day
+app.get('/api/stats/days-failed', async (req, res) => {
+  try {
+    const userId = parseInt(req.query.userId, 10);
+    const startDate = req.query.startDate ? String(req.query.startDate).trim().slice(0, 10) : null;
+    const endDate = req.query.endDate ? String(req.query.endDate).trim().slice(0, 10) : null;
+    if (!userId || !startDate || !endDate || !/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ success: false, error: 'userId, startDate, endDate required (YYYY-MM-DD)' });
+    }
+    const goals = await db.all(
+      db.type === 'postgres'
+        ? `SELECT start_date, end_date FROM goals WHERE user_id = $1 AND start_date <= $2 AND (end_date IS NULL OR end_date >= $3)`
+        : `SELECT start_date, end_date FROM goals WHERE user_id = ? AND start_date <= ? AND (end_date IS NULL OR end_date >= ?)`,
+      [userId, endDate, startDate]
+    );
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const daysWithActiveGoals = new Set();
+    for (const g of goals || []) {
+      const gStart = new Date(g.start_date);
+      const gEnd = g.end_date ? new Date(g.end_date) : new Date(end.getTime());
+      const from = start > gStart ? start : gStart;
+      const to = end < gEnd ? end : gEnd;
+      for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
+        daysWithActiveGoals.add(d.toISOString().slice(0, 10));
+      }
+    }
+    const completedDays = await db.all(
+      db.type === 'postgres'
+        ? `SELECT DISTINCT gc.completion_date::text as d FROM goal_completions gc JOIN goals g ON g.id = gc.goal_id WHERE g.user_id = $1 AND gc.completion_date BETWEEN $2 AND $3 AND gc.duration_minutes > 0`
+        : `SELECT DISTINCT gc.completion_date as d FROM goal_completions gc JOIN goals g ON g.id = gc.goal_id WHERE g.user_id = ? AND gc.completion_date BETWEEN ? AND ? AND gc.duration_minutes > 0`,
+      [userId, startDate, endDate]
+    );
+    const completedSet = new Set((completedDays || []).map(r => String(r.d).slice(0, 10)));
+    let daysFailed = 0;
+    for (const day of daysWithActiveGoals) {
+      if (!completedSet.has(day)) daysFailed++;
+    }
+    res.json({ success: true, daysFailed });
+  } catch (error) {
+    console.error('Error computing days failed:', error);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
 // Day notes (journal: accomplishments, productivity, mood per day)
 app.get('/api/day-notes', async (req, res) => {
   try {
@@ -383,7 +506,7 @@ app.get('/api/leaderboard', async (req, res) => {
       LEFT JOIN goals g ON u.id = g.user_id
       LEFT JOIN goal_completions gc ON g.id = gc.goal_id AND gc.completion_date BETWEEN ${params[0]} AND ${params[1]}
       GROUP BY u.id
-      ORDER BY goals_completed DESC, total_minutes DESC
+      ORDER BY total_minutes DESC, goals_completed DESC
     `;
     
     const leaderboard = await db.all(query, [startDate, endDate]);
@@ -438,6 +561,18 @@ async function insertFriendshipPair(a, b) {
     await db.run(`INSERT OR IGNORE INTO friendships (user_id, friend_id) VALUES (?, ?)`, [a, b]);
     await db.run(`INSERT OR IGNORE INTO friendships (user_id, friend_id) VALUES (?, ?)`, [b, a]);
   }
+}
+
+// Same query used by GET /api/friends - use this to decide "is X in viewer's friend list?"
+async function getFriendIdsForUser(userId) {
+  const rows = await db.all(
+    `SELECT u.id
+     FROM friendships f
+     JOIN users u ON u.id = f.friend_id
+     WHERE f.user_id = ?`,
+    [userId]
+  );
+  return (rows || []).map(r => Number(r.id));
 }
 
 // List friends
@@ -589,24 +724,53 @@ app.post('/api/friends/requests/:requestId/decline', async (req, res) => {
 
 // Friend profile summary (friends-only)
 app.get('/api/users/:profileUserId/summary', async (req, res) => {
+  let profileUserId, viewerId;
   try {
-    const profileUserId = parseInt(req.params.profileUserId) || 0;
-    const viewerId = parseInt(req.query.viewerId) || 0;
-    const startDate = req.query.startDate ? String(req.query.startDate) : null;
-    const endDate = req.query.endDate ? String(req.query.endDate) : null;
-    if (!profileUserId || !viewerId) return res.status(400).json({ success: false, error: 'Invalid user' });
-    const allowed = await areFriends(viewerId, profileUserId);
-    if (!allowed) return res.status(403).json({ success: false, error: 'Not allowed' });
+    profileUserId = parseInt(req.params.profileUserId, 10);
+    const rawViewer = req.query.viewerId;
+    viewerId = rawViewer != null && rawViewer !== '' ? parseInt(String(rawViewer), 10) : 0;
+    if (Number.isNaN(profileUserId)) profileUserId = 0;
+    if (Number.isNaN(viewerId)) viewerId = 0;
+
+    const startDate = req.query.startDate ? String(req.query.startDate).trim().slice(0, 10) : null;
+    const endDate = req.query.endDate ? String(req.query.endDate).trim().slice(0, 10) : null;
+
+    if (!profileUserId || !viewerId) {
+      console.warn('[summary] Invalid user:', { profileUserId, viewerId, rawViewer: req.query.viewerId });
+      return res.status(400).json({ success: false, error: 'Invalid user (missing or invalid viewer or profile id)' });
+    }
+
+    // Use the EXACT same source as the friends list: if profile is in viewer's friend list, allow
+    const isSelf = Number(viewerId) === Number(profileUserId);
+    const friendIds = await getFriendIdsForUser(viewerId);
+    const inFriendsList = friendIds.some(id => Number(id) === Number(profileUserId));
+    const allowed = isSelf || inFriendsList;
+    console.log('[summary]', { profileUserId, viewerId, isSelf, friendIds, inFriendsList, allowed });
+    if (!allowed) {
+      return res.status(403).json({ success: false, error: 'You are not friends with this user.' });
+    }
 
     const user = await db.get(`SELECT id, username FROM users WHERE id = ?`, [profileUserId]);
     if (!user) return res.status(404).json({ success: false, error: 'User not found' });
 
+    // When a date range is provided, count active goals in that range so the stat matches "Today's Goals" list
+    let activeGoalsCount;
+    if (startDate && endDate) {
+      const activeRow = await db.get(
+        db.type === 'postgres'
+          ? `SELECT COUNT(*) as c FROM goals WHERE user_id = $1 AND start_date <= $2 AND (end_date IS NULL OR end_date >= $3)`
+          : `SELECT COUNT(*) as c FROM goals WHERE user_id = ? AND start_date <= ? AND (end_date IS NULL OR end_date >= ?)`,
+        db.type === 'postgres' ? [profileUserId, endDate, startDate] : [profileUserId, endDate, startDate]
+      );
+      activeGoalsCount = Number(activeRow?.c ?? 0);
+    }
     const totals = await db.get(
       `SELECT 
          (SELECT COUNT(*) FROM goals WHERE user_id = ?) as total_goals,
          (SELECT COUNT(*) FROM goals WHERE user_id = ? AND start_date <= CURRENT_DATE AND (end_date IS NULL OR end_date >= CURRENT_DATE)) as active_goals`,
       [profileUserId, profileUserId]
     );
+    if (startDate && endDate) totals.active_goals = activeGoalsCount;
 
     const rangeFilter = startDate && endDate ? 'AND gc.completion_date BETWEEN ? AND ?' : '';
     const rangeParams = startDate && endDate ? [startDate, endDate] : [];
@@ -633,38 +797,51 @@ app.get('/api/users/:profileUserId/summary', async (req, res) => {
       [profileUserId]
     );
 
-    // Goals active in the selected period, with completion status and total minutes in that period
-    const goalRangeFilter = startDate && endDate
-      ? 'AND g.start_date <= ? AND (g.end_date IS NULL OR g.end_date >= ?)'
-      : '';
-    const goalRangeParams = startDate && endDate ? [endDate, startDate] : [];
-    const dateGoalsJoin = startDate && endDate
-      ? 'LEFT JOIN goal_completions gc ON gc.goal_id = g.id AND gc.completion_date BETWEEN ? AND ?'
-      : 'LEFT JOIN goal_completions gc ON gc.goal_id = g.id';
-    const dateGoalsParams = startDate && endDate
-      // NOTE: placeholders in JOIN come before WHERE placeholders
-      ? [startDate, endDate, profileUserId, ...goalRangeParams]
-      : [profileUserId, ...goalRangeParams];
-    const dateGoals = await db.all(
-      `SELECT g.id, g.title, g.duration_minutes as target_minutes, COALESCE(SUM(gc.duration_minutes), 0) as total_minutes
-       FROM goals g
-       ${dateGoalsJoin}
-       WHERE g.user_id = ? ${goalRangeFilter}
-       GROUP BY g.id, g.title, g.duration_minutes
-       ORDER BY LOWER(g.title) ASC`,
-      dateGoalsParams
-    );
+    // All goals active in the period; completion minutes only from this period (so we show all active goals, completed or not)
+    const activityRows = startDate && endDate
+      ? await db.all(
+          db.type === 'postgres'
+            ? `SELECT g.id, g.title as activity, g.duration_minutes as target_minutes,
+                COALESCE(SUM(gc.duration_minutes), 0) as minutes
+               FROM goals g
+               LEFT JOIN goal_completions gc ON gc.goal_id = g.id AND gc.completion_date BETWEEN $1 AND $2
+               WHERE g.user_id = $3 AND g.start_date <= $4 AND (g.end_date IS NULL OR g.end_date >= $5)
+               GROUP BY g.id, g.title, g.duration_minutes
+               ORDER BY minutes DESC, LOWER(g.title) ASC`
+            : `SELECT g.id, g.title as activity, g.duration_minutes as target_minutes,
+                COALESCE(SUM(gc.duration_minutes), 0) as minutes
+               FROM goals g
+               LEFT JOIN goal_completions gc ON gc.goal_id = g.id AND gc.completion_date BETWEEN ? AND ?
+               WHERE g.user_id = ? AND g.start_date <= ? AND (g.end_date IS NULL OR g.end_date >= ?)
+               GROUP BY g.id, g.title, g.duration_minutes
+               ORDER BY minutes DESC, LOWER(g.title) ASC`,
+          db.type === 'postgres' ? [startDate, endDate, profileUserId, endDate, startDate] : [startDate, endDate, profileUserId, endDate, startDate]
+        )
+      : await db.all(
+          `SELECT g.id, g.title as activity, g.duration_minutes as target_minutes, COALESCE(SUM(gc.duration_minutes), 0) as minutes
+           FROM goals g
+           LEFT JOIN goal_completions gc ON gc.goal_id = g.id
+           WHERE g.user_id = ?
+           GROUP BY g.id, g.title, g.duration_minutes
+           ORDER BY minutes DESC, LOWER(g.title) ASC`,
+          [profileUserId]
+        );
 
-    const activityRows = await db.all(
-      `SELECT g.title as activity, COALESCE(SUM(gc.duration_minutes), 0) as minutes
-       FROM goals g
-       LEFT JOIN goal_completions gc ON gc.goal_id = g.id
-       WHERE g.user_id = ?
-         ${rangeFilter}
-       GROUP BY g.title
-       ORDER BY minutes DESC, LOWER(g.title) ASC`,
-      [profileUserId, ...rangeParams]
-    );
+    // Today's Goals: all goals active in the period; "completed" only when 100%+ or no target with any time
+    const dateGoals = (Array.isArray(activityRows) ? activityRows : []).map(r => {
+      const rawTarget = r.target_minutes ?? r.targetMinutes;
+      const mins = Number(r.minutes || 0);
+      const target = rawTarget != null && rawTarget !== '' ? Number(rawTarget) : null;
+      const hasTarget = target != null && target > 0;
+      const completed = hasTarget ? mins >= target : mins > 0;
+      return {
+        id: r.id,
+        title: r.activity || r.title || '',
+        completed,
+        totalMinutes: mins,
+        targetMinutes: target
+      };
+    });
 
     res.json({
       success: true,
@@ -675,24 +852,22 @@ app.get('/api/users/:profileUserId/summary', async (req, res) => {
         totalMinutes: Number(timeRow?.total_minutes || 0),
         last7DaysMinutes: Number(last7?.minutes || 0)
       },
-      activity: activityRows.map(r => ({
-        activity: r.activity,
-        minutes: Number(r.minutes || 0)
-      })),
-      dateGoals: dateGoals.map(g => {
-        const rawTarget = g.target_minutes ?? g.targetMinutes;
+      activity: (Array.isArray(activityRows) ? activityRows : []).map(r => {
+        const rawTarget = r.target_minutes ?? r.targetMinutes;
         return {
-          id: g.id,
-          title: g.title,
-          completed: Number(g.total_minutes || 0) > 0,
-          totalMinutes: Number(g.total_minutes || 0),
+          id: r.id,
+          activity: r.activity || r.title || '',
+          minutes: Number(r.minutes || 0),
           targetMinutes: rawTarget != null && rawTarget !== '' ? Number(rawTarget) : null
         };
-      })
+      }),
+      dateGoals: dateGoals
     });
   } catch (error) {
     console.error('Error fetching user summary:', error);
-    res.status(400).json({ success: false, error: error.message });
+    console.error(error && error.stack);
+    const msg = error && error.message ? String(error.message) : 'Could not load friend profile.';
+    if (!res.headersSent) res.status(400).json({ success: false, error: msg });
   }
 });
 
