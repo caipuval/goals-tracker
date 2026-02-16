@@ -12,6 +12,8 @@ let dayNoteDatesMonthKey = null;
 let allGoals = [];
 let currentFilter = 'all';
 let selectedFriendId = null;
+let timerStartMs = null;
+let timerIntervalId = null;
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
@@ -22,7 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Hash routing: #goals opens My Goals (for deep linking)
     function applyHashView() {
         const hash = (window.location.hash || '').replace(/^#/, '');
-        const valid = ['calendar', 'goals', 'statistics', 'leaderboard', 'friends', 'competition', 'profile'];
+        const valid = ['calendar', 'goals', 'timer', 'statistics', 'leaderboard', 'friends', 'competition', 'profile'];
         if (valid.includes(hash) && currentUser) switchView(hash);
     }
     window.addEventListener('hashchange', applyHashView);
@@ -55,7 +57,7 @@ function showApp() {
     startClock();
     checkMidnightAutoFail();
     const hash = (window.location.hash || '').replace(/^#/, '');
-    const validViews = ['calendar', 'goals', 'statistics', 'leaderboard', 'friends', 'competition', 'profile'];
+    const validViews = ['calendar', 'goals', 'timer', 'statistics', 'leaderboard', 'friends', 'competition', 'profile'];
     if (validViews.includes(hash)) switchView(hash);
     
     // Set both period selectors to "today" by default
@@ -343,6 +345,16 @@ function setupEventListeners() {
         });
     });
 
+    // Timer
+    document.getElementById('timer-start-stop')?.addEventListener('click', toggleTimer);
+    document.getElementById('timer-activity')?.addEventListener('input', updateTimerMatchHint);
+    document.getElementById('timer-activity')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            toggleTimer();
+        }
+    });
+
     // Leaderboard period
     document.getElementById('leaderboard-period').addEventListener('change', loadLeaderboard);
 
@@ -597,6 +609,8 @@ function switchView(view) {
         loadFriendsData();
     } else if (view === 'profile') {
         loadProfile();
+    } else if (view === 'timer') {
+        initTimerView();
     } else if (view === 'calendar' && selectedDate) {
         showDayDetails(selectedDate);
         setTimeout(() => document.getElementById('day-details')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 100);
@@ -1481,7 +1495,7 @@ async function loadGoals() {
     }
 }
 
-function renderGoalsList() {
+async function renderGoalsList() {
     const goalsList = document.getElementById('goals-list');
     goalsList.innerHTML = '';
     
@@ -1530,10 +1544,22 @@ function renderGoalsList() {
         });
     }
     
-    const periodText = period !== 'all' ? document.getElementById('goals-period').selectedOptions[0].text : 'All Time';
-    const loggedStr = formatTime(totalTimeLogged);
+    // If user has a "Self Improvement" competition, sync box to competition time
+    let boxMinutes = totalTimeLogged;
+    let periodText = period !== 'all' ? document.getElementById('goals-period').selectedOptions[0].text : 'All Time';
+    let periodSubtitle = '';
+    try {
+        const siRes = await fetch(`${API_URL}/api/competitions/self-improvement-time?userId=${currentUser?.id || 0}`, { cache: 'no-store' });
+        const siData = await siRes.json();
+        if (siData.success && siData.hasCompetition === true && typeof siData.totalMinutes === 'number') {
+            boxMinutes = siData.totalMinutes;
+            periodSubtitle = ' · Competition';
+        }
+    } catch (_) { /* use goal sum */ }
+    
+    const loggedStr = formatTime(boxMinutes);
     const targetStr = totalTargetMinutes > 0 ? formatTime(totalTargetMinutes) : '';
-    const timeDisplay = targetStr ? `${loggedStr} / ${targetStr}` : loggedStr;
+    const timeDisplay = periodSubtitle ? loggedStr : (targetStr ? `${loggedStr} / ${targetStr}` : loggedStr);
     
     const counterHTML = `
         <div class="self-improvement-counter">
@@ -1549,7 +1575,7 @@ function renderGoalsList() {
             <div class="counter-content">
                 <div class="counter-label">Self Improvement</div>
                 <div class="counter-time">${timeDisplay}</div>
-                <div class="counter-period">${periodText}</div>
+                <div class="counter-period">${periodText}${periodSubtitle}</div>
             </div>
         </div>
     `;
@@ -2153,6 +2179,151 @@ function getStatisticsDates(period, referenceDate = null) {
     }
     
     return { startDate, endDate };
+}
+
+// Timer: match goal by title (case-insensitive trim)
+function findMatchingGoal(activityName) {
+    const name = (activityName || '').trim();
+    if (!name || !allGoals || !Array.isArray(allGoals)) return null;
+    const lower = name.toLowerCase();
+    const today = formatDate(new Date());
+    const match = allGoals.find(g => {
+        const t = (g.title || '').trim();
+        if (!t) return false;
+        if (t.toLowerCase() !== lower) return false;
+        const start = (normalizeToLocalYMD(g.start_date) || String(g.start_date || '').trim().slice(0, 10)).slice(0, 10);
+        const end = (normalizeToLocalYMD(g.end_date) || String(g.end_date || g.start_date || '').trim().slice(0, 10)).slice(0, 10) || start;
+        return start <= today && end >= today;
+    });
+    if (match) return match;
+    return allGoals.find(g => (g.title || '').trim().toLowerCase() === lower) || null;
+}
+
+function initTimerView() {
+    const list = document.getElementById('timer-goals-list');
+    if (list && allGoals && Array.isArray(allGoals)) {
+        const titles = [...new Set(allGoals.map(g => (g.title || '').trim()).filter(Boolean))];
+        list.innerHTML = titles.map(t => `<option value="${escapeHtml(t)}">`).join('');
+    }
+    updateTimerMatchHint();
+    if (timerStartMs != null) {
+        updateTimerDisplay();
+    } else {
+        const el = document.getElementById('timer-display');
+        if (el) el.textContent = '0:00:00';
+    }
+}
+
+function updateTimerMatchHint() {
+    const input = document.getElementById('timer-activity');
+    const hint = document.getElementById('timer-match-hint');
+    if (!input || !hint) return;
+    const name = (input.value || '').trim();
+    if (!name) {
+        hint.textContent = '';
+        hint.classList.remove('timer-match-yes', 'timer-match-no');
+        return;
+    }
+    const goal = findMatchingGoal(name);
+    if (goal) {
+        hint.textContent = `Will log to goal "${escapeHtml(goal.title)}" when you stop.`;
+        hint.classList.add('timer-match-yes');
+        hint.classList.remove('timer-match-no');
+    } else {
+        hint.textContent = 'No goal with this name for today — time will only be shown here.';
+        hint.classList.add('timer-match-no');
+        hint.classList.remove('timer-match-yes');
+    }
+}
+
+function updateTimerDisplay() {
+    const el = document.getElementById('timer-display');
+    if (!el) return;
+    if (timerStartMs == null) {
+        el.textContent = '0:00:00';
+        return;
+    }
+    const sec = Math.floor((Date.now() - timerStartMs) / 1000);
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    el.textContent = `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+function toggleTimer() {
+    if (timerStartMs != null) {
+        stopTimer();
+    } else {
+        startTimer();
+    }
+}
+
+function startTimer() {
+    const input = document.getElementById('timer-activity');
+    const name = (input?.value || '').trim();
+    if (!name) {
+        showErrorModal('Timer', 'Enter an activity name (e.g. Reading) to start.');
+        return;
+    }
+    timerStartMs = Date.now();
+    const btn = document.getElementById('timer-start-stop');
+    if (btn) {
+        btn.textContent = 'Stop';
+        btn.classList.add('timer-running');
+    }
+    document.getElementById('timer-activity')?.setAttribute('readonly', 'readonly');
+    updateTimerDisplay();
+    timerIntervalId = setInterval(updateTimerDisplay, 1000);
+}
+
+async function stopTimer() {
+    if (timerIntervalId != null) {
+        clearInterval(timerIntervalId);
+        timerIntervalId = null;
+    }
+    const elapsedMs = timerStartMs != null ? Date.now() - timerStartMs : 0;
+    timerStartMs = null;
+    const btn = document.getElementById('timer-start-stop');
+    if (btn) {
+        btn.textContent = 'Start';
+        btn.classList.remove('timer-running');
+    }
+    document.getElementById('timer-activity')?.removeAttribute('readonly');
+    const input = document.getElementById('timer-activity');
+    const activityName = (input?.value || '').trim();
+    const durationMinutes = Math.max(0, Math.round(elapsedMs / 60000));
+    updateTimerDisplay();
+
+    if (durationMinutes > 0 && activityName) {
+        const goal = findMatchingGoal(activityName);
+        const today = formatDate(new Date());
+        if (goal) {
+            const existing = (goal.completions || []).find(c => (c.completion_date || '').toString().trim().slice(0, 10) === today);
+            const existingMins = existing ? (Number(existing.duration_minutes) || 0) : 0;
+            const totalMinutes = existingMins + durationMinutes;
+            try {
+                const res = await fetch(`${API_URL}/api/goals/${goal.id}/complete`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ date: today, durationMinutes: totalMinutes })
+                });
+                if (res.ok) {
+                    await loadGoals();
+                    renderCalendar();
+                    loadStatistics();
+                    showErrorModal('Timer', `${formatTime(durationMinutes)} logged to goal "${goal.title}".`);
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    showErrorModal('Timer', err.error || 'Failed to log time to goal.');
+                }
+            } catch (e) {
+                console.error('Timer log error:', e);
+                showErrorModal('Timer', 'Could not log time to goal. Try again.');
+            }
+        } else {
+            showErrorModal('Timer', `${formatTime(durationMinutes)} tracked for "${activityName}". No matching goal for today.`);
+        }
+    }
 }
 
 function renderActivityStats(activityStats) {
@@ -3803,7 +3974,20 @@ async function loadFriendProfile(friendId, period) {
         const dateGoalsTitle = document.getElementById('friend-date-goals-title');
         if (dateGoalsTitle) dateGoalsTitle.textContent = (periodLabels[period] || 'Summary') + "'s Goals";
 
-        const activity = Array.isArray(data.activity) ? data.activity : [];
+        // Aggregate by activity name (same logic as Statistics) so one entry per name in pie chart
+        const rawActivity = Array.isArray(data.activity) ? data.activity : [];
+        const byName = {};
+        rawActivity.forEach(r => {
+            const name = (r.activity || r.title || '').trim() || 'Untitled';
+            const key = name.toLowerCase();
+            if (!byName[key]) {
+                byName[key] = { id: `agg-${key}`, activity: name, minutes: 0, targetMinutes: null };
+            }
+            byName[key].minutes += Number(r.minutes || 0);
+            const t = r.targetMinutes != null && r.targetMinutes !== '' ? Number(r.targetMinutes) : null;
+            if (t != null && t > 0) byName[key].targetMinutes = (byName[key].targetMinutes || 0) + t;
+        });
+        const activity = Object.values(byName).sort((a, b) => b.minutes - a.minutes || (a.activity || '').localeCompare(b.activity || ''));
         renderFriendActivityStats(activity);
 
         const topEl = document.getElementById('friend-top-goals');
