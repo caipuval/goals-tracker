@@ -501,6 +501,149 @@ app.post('/api/day-notes', async (req, res) => {
   }
 });
 
+// Todos API endpoints
+app.get('/api/todos', async (req, res) => {
+  try {
+    const userId = parseInt(req.query.userId, 10);
+    if (!userId) {
+      return res.status(400).json({ success: false, error: 'User ID required' });
+    }
+    const todos = await db.all(
+      db.type === 'postgres'
+        ? 'SELECT id, title, description, completed, sort_order, due_date, created_at, updated_at FROM todos WHERE user_id = $1 ORDER BY sort_order ASC, created_at ASC'
+        : 'SELECT id, title, description, completed, sort_order, due_date, created_at, updated_at FROM todos WHERE user_id = ? ORDER BY sort_order ASC, created_at ASC',
+      [userId]
+    );
+    res.json({ success: true, todos: todos.map(t => ({
+      id: t.id,
+      title: t.title,
+      description: t.description || '',
+      completed: db.type === 'postgres' ? t.completed : Boolean(t.completed),
+      sortOrder: t.sort_order,
+      dueDate: t.due_date || null,
+      createdAt: t.created_at,
+      updatedAt: t.updated_at
+    })) });
+  } catch (error) {
+    console.error('Get todos error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/todos', async (req, res) => {
+  try {
+    const { userId, title, description, dueDate } = req.body;
+    if (!userId || !title || !title.trim()) {
+      return res.status(400).json({ success: false, error: 'User ID and title required' });
+    }
+    const maxOrder = await db.get(
+      db.type === 'postgres'
+        ? 'SELECT COALESCE(MAX(sort_order), 0) as max_order FROM todos WHERE user_id = $1'
+        : 'SELECT COALESCE(MAX(sort_order), 0) as max_order FROM todos WHERE user_id = ?',
+      [userId]
+    );
+    const nextOrder = (maxOrder?.max_order || 0) + 1;
+    const result = await db.run(
+      db.type === 'postgres'
+        ? 'INSERT INTO todos (user_id, title, description, sort_order, due_date) VALUES ($1, $2, $3, $4, $5) RETURNING id'
+        : 'INSERT INTO todos (user_id, title, description, sort_order, due_date) VALUES (?, ?, ?, ?, ?)',
+      [userId, title.trim(), description || '', nextOrder, dueDate || null]
+    );
+    res.json({ success: true, todoId: result.lastID });
+  } catch (error) {
+    console.error('Create todo error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.put('/api/todos/:id', async (req, res) => {
+  try {
+    const todoId = parseInt(req.params.id, 10);
+    const { userId, title, description, completed, dueDate } = req.body;
+    if (!userId || !todoId) {
+      return res.status(400).json({ success: false, error: 'User ID and todo ID required' });
+    }
+    const updates = [];
+    const params = [];
+    let paramIndex = 1;
+    if (title !== undefined) {
+      updates.push(db.type === 'postgres' ? `title = $${paramIndex++}` : 'title = ?');
+      params.push(title.trim());
+    }
+    if (description !== undefined) {
+      updates.push(db.type === 'postgres' ? `description = $${paramIndex++}` : 'description = ?');
+      params.push(description || '');
+    }
+    if (completed !== undefined) {
+      updates.push(db.type === 'postgres' ? `completed = $${paramIndex++}` : 'completed = ?');
+      params.push(db.type === 'postgres' ? completed : (completed ? 1 : 0));
+    }
+    if (dueDate !== undefined) {
+      updates.push(db.type === 'postgres' ? `due_date = $${paramIndex++}` : 'due_date = ?');
+      params.push(dueDate || null);
+    }
+    if (updates.length === 0) {
+      return res.status(400).json({ success: false, error: 'No fields to update' });
+    }
+    updates.push(db.type === 'postgres' ? `updated_at = CURRENT_TIMESTAMP` : `updated_at = CURRENT_TIMESTAMP`);
+    params.push(userId, todoId);
+    await db.run(
+      db.type === 'postgres'
+        ? `UPDATE todos SET ${updates.join(', ')} WHERE user_id = $${paramIndex++} AND id = $${paramIndex++}`
+        : `UPDATE todos SET ${updates.join(', ')} WHERE user_id = ? AND id = ?`,
+      params
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Update todo error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.delete('/api/todos/:id', async (req, res) => {
+  try {
+    const todoId = parseInt(req.params.id, 10);
+    const userId = parseInt(req.query.userId, 10);
+    if (!userId || !todoId) {
+      return res.status(400).json({ success: false, error: 'User ID and todo ID required' });
+    }
+    await db.run(
+      db.type === 'postgres'
+        ? 'DELETE FROM todos WHERE user_id = $1 AND id = $2'
+        : 'DELETE FROM todos WHERE user_id = ? AND id = ?',
+      [userId, todoId]
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Delete todo error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/todos/reorder', async (req, res) => {
+  try {
+    const { userId, todoIds } = req.body;
+    if (!userId || !Array.isArray(todoIds)) {
+      return res.status(400).json({ success: false, error: 'User ID and todo IDs array required' });
+    }
+    await db.serialize(async () => {
+      for (let i = 0; i < todoIds.length; i++) {
+        const todoId = parseInt(todoIds[i], 10);
+        await db.run(
+          db.type === 'postgres'
+            ? 'UPDATE todos SET sort_order = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND id = $3'
+            : 'UPDATE todos SET sort_order = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND id = ?',
+          [i + 1, userId, todoId]
+        );
+      }
+    });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Reorder todos error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Get leaderboard
 app.get('/api/leaderboard', async (req, res) => {
   try {

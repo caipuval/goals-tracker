@@ -193,6 +193,21 @@ if (dbType === 'postgres') {
           UNIQUE(user_id, note_date)
         )
       `);
+
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS todos (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL,
+          title TEXT NOT NULL,
+          description TEXT,
+          completed BOOLEAN DEFAULT FALSE,
+          sort_order INTEGER DEFAULT 0,
+          due_date DATE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+      `);
       
       console.log('✅ PostgreSQL database initialized');
     } catch (error) {
@@ -381,6 +396,21 @@ if (dbType === 'postgres') {
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (user_id) REFERENCES users(id),
           UNIQUE(user_id, note_date)
+        )
+      `);
+
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS todos (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          title TEXT NOT NULL,
+          description TEXT,
+          completed INTEGER DEFAULT 0,
+          sort_order INTEGER DEFAULT 0,
+          due_date DATE,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id)
         )
       `);
       

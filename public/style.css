@@ -3046,3 +3046,324 @@ body {
     margin-top: 16px;
     font-size: 14px;
 }
+
+/* Todos View */
+.todos-content {
+    padding: 24px;
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+.todos-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.todo-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 16px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    transition: all 0.2s;
+    cursor: move;
+}
+
+.todo-number {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    background: var(--accent);
+    color: var(--bg-primary);
+    border-radius: 6px;
+    font-weight: 700;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.todo-item:hover {
+    border-color: var(--accent);
+    box-shadow: 0 2px 8px rgba(168, 85, 247, 0.1);
+}
+
+.todo-item.dragging {
+    opacity: 0.5;
+    border-color: var(--accent);
+}
+
+.todo-drag-handle {
+    color: var(--text-secondary);
+    font-size: 18px;
+    cursor: grab;
+    user-select: none;
+    padding: 4px 0;
+    line-height: 1;
+}
+
+.todo-drag-handle:active {
+    cursor: grabbing;
+}
+
+.todo-checkbox {
+    width: 20px;
+    height: 20px;
+    margin-top: 2px;
+    cursor: pointer;
+    accent-color: var(--accent);
+}
+
+.todo-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.todo-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 4px;
+}
+
+.todo-title {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text-primary);
+    word-wrap: break-word;
+    flex: 1;
+}
+
+.todo-due-date {
+    font-size: 12px;
+    color: var(--text-secondary);
+    padding: 4px 8px;
+    background: var(--bg-tertiary);
+    border-radius: 6px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.todo-title.completed {
+    text-decoration: line-through;
+    color: var(--text-secondary);
+    opacity: 0.7;
+}
+
+.todo-description {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    word-wrap: break-word;
+    white-space: pre-wrap;
+}
+
+.todo-description.completed {
+    text-decoration: line-through;
+    opacity: 0.7;
+}
+
+.todo-delete {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 24px;
+    cursor: pointer;
+    padding: 0;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+
+.todo-delete:hover {
+    background: rgba(255, 68, 68, 0.1);
+    color: var(--danger);
+}
+
+.todos-empty {
+    text-align: center;
+    padding: 80px 24px;
+}
+
+.todos-empty .empty-icon {
+    font-size: 64px;
+    margin-bottom: 24px;
+    opacity: 0.5;
+}
+
+.todos-empty .empty-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+}
+
+.todos-empty .empty-subtitle {
+    font-size: 14px;
+    color: var(--text-secondary);
+}
+
+.todo-modal-content {
+    max-width: 520px;
+    width: 90%;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(168, 85, 247, 0.1);
+    overflow: hidden;
+}
+
+.todo-modal-content .modal-header {
+    padding: 28px 28px 24px 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: linear-gradient(180deg, rgba(168, 85, 247, 0.05) 0%, transparent 100%);
+}
+
+.todo-modal-content .modal-header h3 {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: -0.3px;
+}
+
+.todo-modal-content .modal-close {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 28px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    transition: all 0.2s;
+    font-weight: 300;
+}
+
+.todo-modal-content .modal-close:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    transform: scale(1.1);
+}
+
+#new-todo-modal form {
+    padding: 0;
+}
+
+#new-todo-modal .form-group {
+    margin-bottom: 24px;
+    padding: 0 28px;
+}
+
+#new-todo-modal .form-group:first-of-type {
+    padding-top: 28px;
+}
+
+#new-todo-modal label {
+    display: block;
+    margin-bottom: 10px;
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 14px;
+    letter-spacing: 0.2px;
+}
+
+#new-todo-modal input[type="text"],
+#new-todo-modal input[type="date"],
+#new-todo-modal textarea,
+#new-todo-modal select {
+    width: 100%;
+    padding: 14px 16px;
+    background: var(--bg-tertiary);
+    border: 2px solid var(--border);
+    border-radius: 10px;
+    color: var(--text-primary);
+    font-size: 15px;
+    font-family: inherit;
+    transition: all 0.2s;
+}
+
+#new-todo-modal input[type="text"]:hover,
+#new-todo-modal input[type="date"]:hover,
+#new-todo-modal textarea:hover,
+#new-todo-modal select:hover {
+    border-color: rgba(168, 85, 247, 0.3);
+}
+
+#new-todo-modal input[type="text"]:focus,
+#new-todo-modal input[type="date"]:focus,
+#new-todo-modal textarea:focus,
+#new-todo-modal select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 4px rgba(168, 85, 247, 0.15);
+    background: var(--bg-secondary);
+}
+
+#new-todo-modal textarea {
+    resize: vertical;
+    min-height: 100px;
+    line-height: 1.6;
+}
+
+.todo-timeframe-select {
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23a855f7' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 14px center;
+    padding-right: 40px;
+}
+
+.todo-date-input {
+    cursor: pointer;
+}
+
+#new-todo-modal .modal-actions {
+    padding: 24px 28px 28px 28px;
+    margin-top: 8px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 12px;
+    background: rgba(0, 0, 0, 0.2);
+}
+
+#new-todo-modal .modal-actions .btn-secondary,
+#new-todo-modal .modal-actions .btn-primary {
+    flex: 1;
+    padding: 14px 24px;
+    font-size: 15px;
+    font-weight: 600;
+    border-radius: 10px;
+    transition: all 0.2s;
+}
+
+#new-todo-modal .modal-actions .btn-primary {
+    background: var(--accent);
+    border: none;
+    box-shadow: 0 4px 12px rgba(168, 85, 247, 0.3);
+}
+
+#new-todo-modal .modal-actions .btn-primary:hover {
+    background: var(--accent-dark);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(168, 85, 247, 0.4);
+}

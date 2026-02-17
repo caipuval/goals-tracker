@@ -1,0 +1,19 @@
+---
+description: Require browser verification for UI changes before marking tasks complete
+globs: public/**/*.js, public/**/*.html, public/**/*.css
+---
+
+# Verify UI changes in the browser
+
+When implementing or fixing **UI/frontend** changes (e.g. styling, new elements, visibility, selection state):
+
+1. **Do not** say the task is complete until the change is **visibly confirmed** in the app.
+2. **Verify in the browser:**
+   - Start or use the running app (e.g. `http://localhost:3000` or the deployed URL).
+   - Navigate to the relevant view (e.g. Competition, Friends).
+   - Use **browser tools**: `browser_navigate`, `browser_snapshot`, `browser_take_screenshot`, and any clicks/inputs needed to reach the changed UI.
+   - Inspect the screenshot or snapshot: is the change actually visible (e.g. purple outline, "Member" badge)?
+3. **If the change is not visible:** keep debugging (check selectors, IDs, CSS, when handlers run, re-renders) and re-verify in the browser. Do **not** report the task as done until the UI shows the fix.
+4. **If the app cannot be loaded** (e.g. no server, no login): say so explicitly and note that verification was not possible; do not claim the change is "done" without verification.
+
+Summarize verification: e.g. "Verified in browser: [screenshot/snapshot] shows [the change]."

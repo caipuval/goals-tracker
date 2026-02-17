@@ -24,7 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Hash routing: #goals opens My Goals (for deep linking)
     function applyHashView() {
         const hash = (window.location.hash || '').replace(/^#/, '');
-        const valid = ['calendar', 'goals', 'timer', 'statistics', 'leaderboard', 'friends', 'competition', 'profile'];
+        const valid = ['calendar', 'goals', 'timer', 'todos', 'statistics', 'leaderboard', 'friends', 'competition', 'profile'];
         if (valid.includes(hash) && currentUser) switchView(hash);
     }
     window.addEventListener('hashchange', applyHashView);
@@ -57,7 +57,7 @@ function showApp() {
     startClock();
     checkMidnightAutoFail();
     const hash = (window.location.hash || '').replace(/^#/, '');
-    const validViews = ['calendar', 'goals', 'timer', 'statistics', 'leaderboard', 'friends', 'competition', 'profile'];
+    const validViews = ['calendar', 'goals', 'timer', 'todos', 'statistics', 'leaderboard', 'friends', 'competition', 'profile'];
     if (validViews.includes(hash)) switchView(hash);
     
     // Set both period selectors to "today" by default
@@ -76,7 +76,6 @@ function showApp() {
     renderCalendar();
     if (selectedDate) {
         showDayDetails(selectedDate);
-        setTimeout(() => document.getElementById('day-details')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 100);
     }
     loadLeaderboard();
     loadFriendsData();
@@ -236,6 +235,10 @@ function setupEventListeners() {
     // Goal modal
     document.getElementById('new-goal-btn').addEventListener('click', () => {
         openGoalModal();
+    });
+
+    document.getElementById('new-todo-btn')?.addEventListener('click', () => {
+        openNewTodoModal();
     });
 
     document.getElementById('close-modal').addEventListener('click', closeModal);
@@ -611,9 +614,10 @@ function switchView(view) {
         loadProfile();
     } else if (view === 'timer') {
         initTimerView();
+    } else if (view === 'todos') {
+        loadTodos();
     } else if (view === 'calendar' && selectedDate) {
         showDayDetails(selectedDate);
-        setTimeout(() => document.getElementById('day-details')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 100);
     }
 }
 
@@ -4121,6 +4125,285 @@ function renderFriendActivityStats(activityRows) {
     const chartData = activities.map(a => [a.name, a.minutes]);
     renderActivityChart(chartData, 'friend-activity-chart');
 }
+
+// Todos Functions
+let todos = [];
+let draggedTodo = null;
+
+async function loadTodos() {
+    if (!currentUser) return;
+    try {
+        const response = await fetch(`${API_URL}/api/todos?userId=${currentUser.id}`);
+        const data = await response.json();
+        if (data.success) {
+            todos = data.todos || [];
+            renderTodos();
+        }
+    } catch (error) {
+        console.error('Error loading todos:', error);
+    }
+}
+
+function renderTodos() {
+    const list = document.getElementById('todos-list');
+    const empty = document.getElementById('todos-empty');
+    if (!list || !empty) return;
+    
+    if (todos.length === 0) {
+        list.innerHTML = '';
+        empty.style.display = 'block';
+        return;
+    }
+    
+    empty.style.display = 'none';
+    list.innerHTML = todos.map((todo, index) => {
+        const number = index + 1;
+        const dueDateDisplay = todo.dueDate ? (() => {
+            const [y, m, d] = todo.dueDate.split('-').map(Number);
+            return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        })() : null;
+        return `
+        <div class="todo-item" data-todo-id="${todo.id}" draggable="true">
+            <div class="todo-number">${number}</div>
+            <div class="todo-drag-handle" aria-label="Drag to reorder">⋮⋮</div>
+            <input type="checkbox" class="todo-checkbox" ${todo.completed ? 'checked' : ''} data-todo-id="${todo.id}" aria-label="Mark as ${todo.completed ? 'incomplete' : 'complete'}">
+            <div class="todo-content">
+                <div class="todo-title-row">
+                    <div class="todo-title ${todo.completed ? 'completed' : ''}">${escapeHtml(todo.title)}</div>
+                    ${dueDateDisplay ? `<div class="todo-due-date">${dueDateDisplay}</div>` : ''}
+                </div>
+                ${todo.description ? `<div class="todo-description ${todo.completed ? 'completed' : ''}">${escapeHtml(todo.description)}</div>` : ''}
+            </div>
+            <button class="todo-delete" data-todo-id="${todo.id}" aria-label="Delete to do">×</button>
+        </div>
+    `;
+    }).join('');
+    
+    // Attach event listeners
+    list.querySelectorAll('.todo-checkbox').forEach(cb => {
+        cb.addEventListener('change', (e) => toggleTodo(parseInt(e.target.dataset.todoId, 10)));
+    });
+    
+    list.querySelectorAll('.todo-delete').forEach(btn => {
+        btn.addEventListener('click', (e) => deleteTodo(parseInt(e.target.dataset.todoId, 10)));
+    });
+    
+    // Drag and drop
+    setupTodoDragAndDrop();
+}
+
+function setupTodoDragAndDrop() {
+    const list = document.getElementById('todos-list');
+    if (!list) return;
+    
+    const items = list.querySelectorAll('.todo-item');
+    items.forEach(item => {
+        item.addEventListener('dragstart', (e) => {
+            draggedTodo = item;
+            item.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+        });
+        
+        item.addEventListener('dragend', () => {
+            item.classList.remove('dragging');
+            draggedTodo = null;
+        });
+        
+        item.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            const afterElement = getDragAfterElement(list, e.clientY);
+            if (afterElement == null) {
+                list.appendChild(item);
+            } else {
+                list.insertBefore(item, afterElement);
+            }
+        });
+        
+        item.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            if (draggedTodo && draggedTodo !== item) {
+                await reorderTodos();
+            }
+        });
+    });
+}
+
+function getDragAfterElement(container, y) {
+    const draggableElements = [...container.querySelectorAll('.todo-item:not(.dragging)')];
+    return draggableElements.reduce((closest, child) => {
+        const box = child.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        if (offset < 0 && offset > closest.offset) {
+            return { offset: offset, element: child };
+        } else {
+            return closest;
+        }
+    }, { offset: Number.NEGATIVE_INFINITY }).element;
+}
+
+async function reorderTodos() {
+    const list = document.getElementById('todos-list');
+    if (!list) return;
+    const todoIds = Array.from(list.querySelectorAll('.todo-item')).map(item => parseInt(item.dataset.todoId, 10));
+    try {
+        const response = await fetch(`${API_URL}/api/todos/reorder`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: currentUser.id, todoIds })
+        });
+        const data = await response.json();
+        if (data.success) {
+            await loadTodos();
+        }
+    } catch (error) {
+        console.error('Error reordering todos:', error);
+    }
+}
+
+async function toggleTodo(todoId) {
+    const todo = todos.find(t => t.id === todoId);
+    if (!todo) return;
+    try {
+        const response = await fetch(`${API_URL}/api/todos/${todoId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: currentUser.id, completed: !todo.completed })
+        });
+        const data = await response.json();
+        if (data.success) {
+            await loadTodos();
+        }
+    } catch (error) {
+        console.error('Error toggling todo:', error);
+    }
+}
+
+async function deleteTodo(todoId) {
+    if (!confirm('Delete this to do?')) return;
+    try {
+        const response = await fetch(`${API_URL}/api/todos/${todoId}?userId=${currentUser.id}`, {
+            method: 'DELETE'
+        });
+        const data = await response.json();
+        if (data.success) {
+            await loadTodos();
+        }
+    } catch (error) {
+        console.error('Error deleting todo:', error);
+    }
+}
+
+function openNewTodoModal() {
+    const modal = document.getElementById('new-todo-modal');
+    if (!modal) {
+        const modalHtml = `
+            <div id="new-todo-modal" class="modal">
+                <div class="modal-content todo-modal-content">
+                    <div class="modal-header">
+                        <h3>New To do</h3>
+                        <button class="modal-close" onclick="closeNewTodoModal()" aria-label="Close">×</button>
+                    </div>
+                    <form id="new-todo-form">
+                        <div class="form-group">
+                            <label>Title *</label>
+                            <input type="text" id="new-todo-title" required placeholder="e.g., Buy groceries">
+                        </div>
+                        <div class="form-group">
+                            <label>Description</label>
+                            <textarea id="new-todo-description" rows="3" placeholder="Optional details..."></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Time Frame</label>
+                            <select id="new-todo-timeframe" class="todo-timeframe-select">
+                                <option value="today">Today</option>
+                                <option value="week">This week</option>
+                                <option value="month">This Month</option>
+                                <option value="year">This year</option>
+                                <option value="all">All time</option>
+                                <option value="custom">Custom</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="new-todo-custom-date-group" style="display: none;">
+                            <label>Due Date</label>
+                            <input type="date" id="new-todo-custom-date" class="todo-date-input">
+                        </div>
+                        <div class="modal-actions">
+                            <button type="button" class="btn-secondary" onclick="closeNewTodoModal()">Cancel</button>
+                            <button type="submit" class="btn-primary">Create</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        `;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        
+        const timeframeSelect = document.getElementById('new-todo-timeframe');
+        const customDateGroup = document.getElementById('new-todo-custom-date-group');
+        timeframeSelect.addEventListener('change', (e) => {
+            customDateGroup.style.display = e.target.value === 'custom' ? 'block' : 'none';
+        });
+        
+        document.getElementById('new-todo-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const title = document.getElementById('new-todo-title').value.trim();
+            const description = document.getElementById('new-todo-description').value.trim();
+            const timeframe = document.getElementById('new-todo-timeframe').value;
+            if (!title) return;
+            
+            let dueDate = null;
+            if (timeframe === 'custom') {
+                dueDate = document.getElementById('new-todo-custom-date').value || null;
+            } else if (timeframe !== 'all') {
+                const today = new Date();
+                if (timeframe === 'today') {
+                    dueDate = formatDate(today);
+                } else if (timeframe === 'week') {
+                    const day = today.getDay();
+                    const diff = today.getDate() - day + (day === 0 ? -6 : 1);
+                    const sunday = new Date(today);
+                    sunday.setDate(diff + 6);
+                    dueDate = formatDate(sunday);
+                } else if (timeframe === 'month') {
+                    const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+                    dueDate = formatDate(lastDay);
+                } else if (timeframe === 'year') {
+                    dueDate = `${today.getFullYear()}-12-31`;
+                }
+            }
+            
+            try {
+                const response = await fetch(`${API_URL}/api/todos`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userId: currentUser.id, title, description, dueDate })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    closeNewTodoModal();
+                    await loadTodos();
+                }
+            } catch (error) {
+                console.error('Error creating todo:', error);
+                alert('Failed to create to do');
+            }
+        });
+    }
+    modal.style.display = 'flex';
+    document.getElementById('new-todo-title').value = '';
+    document.getElementById('new-todo-description').value = '';
+    document.getElementById('new-todo-timeframe').value = 'today';
+    document.getElementById('new-todo-custom-date-group').style.display = 'none';
+    document.getElementById('new-todo-custom-date').value = '';
+    setTimeout(() => document.getElementById('new-todo-title').focus(), 100);
+}
+
+function closeNewTodoModal() {
+    const modal = document.getElementById('new-todo-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+window.closeNewTodoModal = closeNewTodoModal;
 
 async function checkPendingInvitations() {
     try {

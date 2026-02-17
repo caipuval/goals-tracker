@@ -99,6 +99,10 @@
                     <span class="icon">⏱️</span>
                     <span>Timer</span>
                 </button>
+                <button class="nav-item" data-view="todos">
+                    <span class="icon">📝</span>
+                    <span>To do</span>
+                </button>
                 <button class="nav-item" data-view="statistics">
                     <span class="icon">📊</span>
                     <span>Statistics</span>
@@ -218,6 +222,22 @@
                         </div>
                         <div class="timer-actions">
                             <button type="button" id="timer-start-stop" class="btn-primary timer-btn">Start</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- To do View -->
+                <div id="todos-view" class="view">
+                    <div class="view-header">
+                        <h2>To do</h2>
+                        <button id="new-todo-btn" class="btn-primary">+ New To do</button>
+                    </div>
+                    <div class="todos-content">
+                        <div id="todos-list" class="todos-list"></div>
+                        <div id="todos-empty" class="todos-empty" style="display: none;">
+                            <div class="empty-icon" aria-hidden="true">📝</div>
+                            <p class="empty-title">No to dos yet</p>
+                            <p class="empty-subtitle">Click "+ New To do" to add your first task</p>
                         </div>
                     </div>
                 </div>
