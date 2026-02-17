@@ -4033,6 +4033,27 @@ async function loadFriendProfile(friendId, period) {
           }).join('')
           : `<div class="friend-item"><div class="friend-item__left"><div class="friend-item__meta">No goals in this period.</div></div></div>`;
     }
+
+        // Friend's day note — use dayNote from summary response (server includes it in same request)
+        const note = data.dayNote && typeof data.dayNote === 'object' ? data.dayNote : null;
+        const noteDateShown = note && note.note_date ? String(note.note_date).trim().slice(0, 10) : (endDate || formatDate(refDate || new Date()));
+        const noteDateDisplay = noteDateShown && /^\d{4}-\d{2}-\d{2}$/.test(noteDateShown) ? (() => {
+            const [y, m, d] = noteDateShown.split('-').map(Number);
+            return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        })() : noteDateShown;
+        const dateLabelEl = document.getElementById('friend-day-note-date');
+        if (dateLabelEl) dateLabelEl.textContent = noteDateDisplay ? ` · ${noteDateDisplay}` : '';
+        const prodVal = note ? (Number(note.productivity_rating ?? note.productivityRating) || 0) : 0;
+        const moodVal = note ? (Number(note.mood_rating ?? note.moodRating) || 0) : 0;
+        const hasNote = note && (note.accomplishments || note.notes || prodVal >= 1 || moodVal >= 1);
+        const notesEl = document.getElementById('friend-day-note-notes');
+        const prodEl = document.getElementById('friend-day-note-productivity');
+        const moodEl = document.getElementById('friend-day-note-mood');
+        const emptyEl = document.getElementById('friend-day-note-empty');
+        if (notesEl) notesEl.textContent = note && (note.accomplishments || note.notes) ? (note.accomplishments || '') + (note.notes ? (note.accomplishments ? '\n\n' : '') + note.notes : '') : '';
+        if (prodEl) prodEl.querySelectorAll('.friend-day-note-star').forEach((el, i) => el.classList.toggle('active', hasNote && prodVal >= i + 1));
+        if (moodEl) moodEl.querySelectorAll('.friend-day-note-mood-btn').forEach((el, i) => el.classList.toggle('active', hasNote && moodVal >= i + 1));
+        if (emptyEl) emptyEl.style.display = hasNote ? 'none' : 'block';
     } catch (err) {
         console.error('Friend profile render error:', err);
         if (selectedFriendId === friendId) {

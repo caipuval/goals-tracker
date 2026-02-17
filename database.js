@@ -10,7 +10,15 @@ if (dbType === 'postgres') {
   
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false
+    ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false,
+    connectionTimeoutMillis: 10000, // 10 second timeout
+    idleTimeoutMillis: 30000,
+    max: 10
+  });
+  
+  // Test connection immediately and log errors
+  pool.on('error', (err) => {
+    console.error('❌ PostgreSQL pool error:', err);
   });
   
   db = {
@@ -48,9 +56,13 @@ if (dbType === 'postgres') {
     }
   };
   
-  // Initialize PostgreSQL tables
+  // Initialize PostgreSQL tables (non-blocking - server starts even if DB init fails)
   (async () => {
     try {
+      // Test connection first
+      await pool.query('SELECT NOW()');
+      console.log('✅ PostgreSQL connection established');
+      
       await db.run(`
         CREATE TABLE IF NOT EXISTS users (
           id SERIAL PRIMARY KEY,
@@ -185,9 +197,12 @@ if (dbType === 'postgres') {
       console.log('✅ PostgreSQL database initialized');
     } catch (error) {
       console.error('❌ Database initialization error:', error.message);
+      console.error('Stack:', error.stack);
+      // Don't throw - let server start anyway, DB queries will fail gracefully
     }
   })().catch(err => {
     console.error('❌ Database init unhandled:', err);
+    // Don't crash the process
   });
   
 } else {

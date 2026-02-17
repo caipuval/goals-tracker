@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Goals Tracker - Premium</title>
+    <link rel="icon" type="image/png" href="/Images/GT_Logo_2.png">
     <link rel="stylesheet" href="style.css?v=39">
 </head>
 <body>
@@ -93,6 +94,10 @@
                 <button class="nav-item" data-view="goals">
                     <span class="icon">🎯</span>
                     <span>My Goals</span>
+                </button>
+                <button class="nav-item" data-view="timer">
+                    <span class="icon">⏱️</span>
+                    <span>Timer</span>
                 </button>
                 <button class="nav-item" data-view="statistics">
                     <span class="icon">📊</span>
@@ -193,6 +198,28 @@
                         </select>
                     </div>
                     <div id="goals-list"></div>
+                </div>
+
+                <!-- Timer View -->
+                <div id="timer-view" class="view">
+                    <div class="view-header">
+                        <h2>Timer</h2>
+                    </div>
+                    <div class="timer-content">
+                        <p class="timer-description">Track time for an activity. If you have a goal with the same name, time will be logged to it when you stop.</p>
+                        <div class="timer-activity-row">
+                            <label for="timer-activity" class="timer-label">Activity</label>
+                            <input type="text" id="timer-activity" class="timer-input" placeholder="e.g. Reading" list="timer-goals-list" autocomplete="off" />
+                            <datalist id="timer-goals-list"></datalist>
+                        </div>
+                        <div id="timer-match-hint" class="timer-match-hint" aria-live="polite"></div>
+                        <div class="timer-display-wrap">
+                            <div id="timer-display" class="timer-display">0:00:00</div>
+                        </div>
+                        <div class="timer-actions">
+                            <button type="button" id="timer-start-stop" class="btn-primary timer-btn">Start</button>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Statistics View -->
@@ -363,6 +390,38 @@
                                     <div class="friends-card friends-detail-card">
                                         <h3 id="friend-date-goals-title">Today's Goals</h3>
                                         <div id="friend-top-goals" class="friends-top-goals friends-date-goals"></div>
+                                    </div>
+
+                                    <div id="friend-day-note-section" class="day-note-section friend-day-note-section">
+                                        <h4 class="day-note-title">Day note</h4>
+                                        <p class="day-note-subtitle">Rate your productivity and mood <span id="friend-day-note-date" class="friend-day-note-date"></span></p>
+                                        <div class="day-note-form friend-day-note-form">
+                                            <label class="day-note-label">Notes</label>
+                                            <div id="friend-day-note-notes" class="friend-day-note-notes" aria-readonly="true"></div>
+                                            <div class="day-note-ratings">
+                                                <div class="day-note-rating-group">
+                                                    <label class="day-note-label">Productivity</label>
+                                                    <div id="friend-day-note-productivity" class="day-note-stars friend-day-note-stars" aria-label="Productivity 1–5">
+                                                        <span class="day-note-star friend-day-note-star" data-value="1">★</span>
+                                                        <span class="day-note-star friend-day-note-star" data-value="2">★</span>
+                                                        <span class="day-note-star friend-day-note-star" data-value="3">★</span>
+                                                        <span class="day-note-star friend-day-note-star" data-value="4">★</span>
+                                                        <span class="day-note-star friend-day-note-star" data-value="5">★</span>
+                                                    </div>
+                                                </div>
+                                                <div class="day-note-rating-group">
+                                                    <label class="day-note-label">Mood</label>
+                                                    <div id="friend-day-note-mood" class="day-note-mood friend-day-note-mood" aria-label="Mood 1–5">
+                                                        <span class="day-note-mood-btn friend-day-note-mood-btn" data-value="1">😢</span>
+                                                        <span class="day-note-mood-btn friend-day-note-mood-btn" data-value="2">😐</span>
+                                                        <span class="day-note-mood-btn friend-day-note-mood-btn" data-value="3">🙂</span>
+                                                        <span class="day-note-mood-btn friend-day-note-mood-btn" data-value="4">😊</span>
+                                                        <span class="day-note-mood-btn friend-day-note-mood-btn" data-value="5">😄</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <p id="friend-day-note-empty" class="friend-day-note-empty">No day note for this date.</p>
+                                        </div>
                                     </div>
                                 </div>
                             </div>

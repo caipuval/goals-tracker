@@ -10,6 +10,16 @@ app.get('/api/health', (req, res) => {
   res.status(200).json({ ok: true, ts: new Date().toISOString() });
 });
 
+// Root health check (some platforms check /)
+app.get('/health', (req, res) => {
+  res.status(200).json({ ok: true, ts: new Date().toISOString() });
+});
+
+// Root endpoint
+app.get('/', (req, res) => {
+  res.sendFile(__dirname + '/public/index.html');
+});
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -575,6 +585,37 @@ async function getFriendIdsForUser(userId) {
   return (rows || []).map(r => Number(r.id));
 }
 
+function normalizeDayNoteResponse(row) {
+  if (!row) return null;
+  let noteDate = row.note_date;
+  if (noteDate instanceof Date) {
+    const y = noteDate.getFullYear();
+    const m = String(noteDate.getMonth() + 1).padStart(2, '0');
+    const d = String(noteDate.getDate()).padStart(2, '0');
+    noteDate = `${y}-${m}-${d}`;
+  } else if (noteDate != null) {
+    const s = String(noteDate).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s.slice(0, 10))) {
+      noteDate = s.slice(0, 10);
+    } else {
+      const d = new Date(s);
+      if (!Number.isNaN(d.getTime())) {
+        noteDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      } else {
+        noteDate = s.slice(0, 10);
+      }
+    }
+  }
+  return {
+    id: row.id,
+    note_date: noteDate,
+    accomplishments: row.accomplishments ?? null,
+    productivity_rating: row.productivity_rating != null ? Number(row.productivity_rating) : null,
+    mood_rating: row.mood_rating != null ? Number(row.mood_rating) : null,
+    notes: row.notes ?? null
+  };
+}
+
 // List friends
 app.get('/api/friends', async (req, res) => {
   try {
@@ -867,6 +908,27 @@ app.get('/api/users/:profileUserId/summary', async (req, res) => {
     });
     const activity = Object.values(byName).sort((a, b) => b.minutes - a.minutes || (a.activity || '').localeCompare(b.activity || ''));
 
+    // Include friend's day note in same response so client always has it (no separate request)
+    const noteDate = endDate || (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
+    let dayNoteRow = null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(noteDate)) {
+      dayNoteRow = await db.get(
+        db.type === 'postgres'
+          ? "SELECT id, to_char(note_date, 'YYYY-MM-DD') as note_date, accomplishments, productivity_rating, mood_rating, notes FROM day_notes WHERE user_id = $1 AND note_date::date = $2::date"
+          : "SELECT id, strftime('%Y-%m-%d', note_date) as note_date, accomplishments, productivity_rating, mood_rating, notes FROM day_notes WHERE user_id = ? AND date(note_date) = date(?)",
+        [profileUserId, noteDate]
+      );
+    }
+    if (!dayNoteRow) {
+      dayNoteRow = await db.get(
+        db.type === 'postgres'
+          ? "SELECT id, to_char(note_date, 'YYYY-MM-DD') as note_date, accomplishments, productivity_rating, mood_rating, notes FROM day_notes WHERE user_id = $1 ORDER BY note_date DESC LIMIT 1"
+          : "SELECT id, strftime('%Y-%m-%d', note_date) as note_date, accomplishments, productivity_rating, mood_rating, notes FROM day_notes WHERE user_id = ? ORDER BY note_date DESC LIMIT 1",
+        [profileUserId]
+      );
+    }
+    const dayNote = dayNoteRow ? normalizeDayNoteResponse(dayNoteRow) : null;
+
     res.json({
       success: true,
       user,
@@ -877,13 +939,71 @@ app.get('/api/users/:profileUserId/summary', async (req, res) => {
         last7DaysMinutes: Number(last7?.minutes || 0)
       },
       activity,
-      dateGoals: dateGoals
+      dateGoals: dateGoals,
+      dayNote
     });
   } catch (error) {
     console.error('Error fetching user summary:', error);
     console.error(error && error.stack);
     const msg = error && error.message ? String(error.message) : 'Could not load friend profile.';
     if (!res.headersSent) res.status(400).json({ success: false, error: msg });
+  }
+});
+
+// Friend's latest day note (friends-only) — register BEFORE /day-note so /day-note/latest matches
+app.get('/api/users/:profileUserId/day-note/latest', async (req, res) => {
+  try {
+    const profileUserId = parseInt(req.params.profileUserId, 10);
+    const viewerId = req.query.viewerId != null && req.query.viewerId !== '' ? parseInt(String(req.query.viewerId), 10) : 0;
+    if (!profileUserId || !viewerId) {
+      return res.status(400).json({ success: false, error: 'profile user and viewer required' });
+    }
+    const isSelf = Number(viewerId) === Number(profileUserId);
+    const friendIds = await getFriendIdsForUser(viewerId);
+    const allowed = isSelf || friendIds.some(id => Number(id) === Number(profileUserId));
+    if (!allowed) {
+      return res.status(403).json({ success: false, error: 'You are not friends with this user.' });
+    }
+    const row = await db.get(
+      db.type === 'postgres'
+        ? "SELECT id, to_char(note_date, 'YYYY-MM-DD') as note_date, accomplishments, productivity_rating, mood_rating, notes FROM day_notes WHERE user_id = $1 ORDER BY note_date DESC LIMIT 1"
+        : "SELECT id, strftime('%Y-%m-%d', note_date) as note_date, accomplishments, productivity_rating, mood_rating, notes FROM day_notes WHERE user_id = ? ORDER BY note_date DESC LIMIT 1",
+      [profileUserId]
+    );
+    const note = row ? normalizeDayNoteResponse(row) : null;
+    res.json({ success: true, note });
+  } catch (error) {
+    console.error('Get friend latest day note error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Friend's day note by date (friends-only, read-only)
+app.get('/api/users/:profileUserId/day-note', async (req, res) => {
+  try {
+    const profileUserId = parseInt(req.params.profileUserId, 10);
+    const viewerId = req.query.viewerId != null && req.query.viewerId !== '' ? parseInt(String(req.query.viewerId), 10) : 0;
+    const date = req.query.date ? String(req.query.date).trim().slice(0, 10) : null;
+    if (!profileUserId || !/^\d{4}-\d{2}-\d{2}$/.test(date || '')) {
+      return res.status(400).json({ success: false, error: 'profile user and date (YYYY-MM-DD) required' });
+    }
+    const isSelf = Number(viewerId) === Number(profileUserId);
+    const friendIds = await getFriendIdsForUser(viewerId);
+    const allowed = isSelf || friendIds.some(id => Number(id) === Number(profileUserId));
+    if (!allowed) {
+      return res.status(403).json({ success: false, error: 'You are not friends with this user.' });
+    }
+    const row = await db.get(
+      db.type === 'postgres'
+        ? "SELECT id, to_char(note_date, 'YYYY-MM-DD') as note_date, accomplishments, productivity_rating, mood_rating, notes FROM day_notes WHERE user_id = $1 AND note_date::date = $2::date"
+        : "SELECT id, strftime('%Y-%m-%d', note_date) as note_date, accomplishments, productivity_rating, mood_rating, notes FROM day_notes WHERE user_id = ? AND date(note_date) = date(?)",
+      [profileUserId, date]
+    );
+    const note = row ? normalizeDayNoteResponse(row) : null;
+    res.json({ success: true, note });
+  } catch (error) {
+    console.error('Get friend day note error:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -2115,7 +2235,11 @@ app.post('/api/competition/invitations/:inviteId/decline', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
+
+// Start server immediately - don't wait for DB init
 app.listen(PORT, HOST, () => {
   console.log(`🚀 Goals Tracker running on http://${HOST}:${PORT}`);
   console.log(`📊 Using ${db.type.toUpperCase()} database`);
+  console.log(`✅ Server is ready to accept connections`);
+  console.log(`🔍 Health check: http://${HOST}:${PORT}/api/health`);
 });
