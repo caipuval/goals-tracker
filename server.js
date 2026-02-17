@@ -510,8 +510,8 @@ app.get('/api/todos', async (req, res) => {
     }
     const todos = await db.all(
       db.type === 'postgres'
-        ? 'SELECT id, title, description, completed, sort_order, due_date, created_at, updated_at FROM todos WHERE user_id = $1 ORDER BY sort_order ASC, created_at ASC'
-        : 'SELECT id, title, description, completed, sort_order, due_date, created_at, updated_at FROM todos WHERE user_id = ? ORDER BY sort_order ASC, created_at ASC',
+        ? 'SELECT id, title, description, completed, sort_order, due_date, completed_minutes, notes, created_at, updated_at FROM todos WHERE user_id = $1 ORDER BY sort_order ASC, created_at ASC'
+        : 'SELECT id, title, description, completed, sort_order, due_date, completed_minutes, notes, created_at, updated_at FROM todos WHERE user_id = ? ORDER BY sort_order ASC, created_at ASC',
       [userId]
     );
     res.json({ success: true, todos: todos.map(t => ({
@@ -521,6 +521,8 @@ app.get('/api/todos', async (req, res) => {
       completed: db.type === 'postgres' ? t.completed : Boolean(t.completed),
       sortOrder: t.sort_order,
       dueDate: t.due_date || null,
+      completedMinutes: t.completed_minutes != null ? Number(t.completed_minutes) : null,
+      notes: t.notes || '',
       createdAt: t.created_at,
       updatedAt: t.updated_at
     })) });
@@ -559,7 +561,7 @@ app.post('/api/todos', async (req, res) => {
 app.put('/api/todos/:id', async (req, res) => {
   try {
     const todoId = parseInt(req.params.id, 10);
-    const { userId, title, description, completed, dueDate } = req.body;
+    const { userId, title, description, completed, dueDate, completedMinutes, notes } = req.body;
     if (!userId || !todoId) {
       return res.status(400).json({ success: false, error: 'User ID and todo ID required' });
     }
@@ -581,6 +583,14 @@ app.put('/api/todos/:id', async (req, res) => {
     if (dueDate !== undefined) {
       updates.push(db.type === 'postgres' ? `due_date = $${paramIndex++}` : 'due_date = ?');
       params.push(dueDate || null);
+    }
+    if (completedMinutes !== undefined) {
+      updates.push(db.type === 'postgres' ? `completed_minutes = $${paramIndex++}` : 'completed_minutes = ?');
+      params.push(completedMinutes === '' || completedMinutes === null ? null : parseInt(completedMinutes, 10));
+    }
+    if (notes !== undefined) {
+      updates.push(db.type === 'postgres' ? `notes = $${paramIndex++}` : 'notes = ?');
+      params.push(notes || '');
     }
     if (updates.length === 0) {
       return res.status(400).json({ success: false, error: 'No fields to update' });
@@ -606,6 +616,21 @@ app.delete('/api/todos/:id', async (req, res) => {
     const userId = parseInt(req.query.userId, 10);
     if (!userId || !todoId) {
       return res.status(400).json({ success: false, error: 'User ID and todo ID required' });
+    }
+    // Backup before deletion
+    const todo = await db.get(
+      db.type === 'postgres'
+        ? 'SELECT * FROM todos WHERE user_id = $1 AND id = $2'
+        : 'SELECT * FROM todos WHERE user_id = ? AND id = ?',
+      [userId, todoId]
+    );
+    if (todo) {
+      await db.run(
+        db.type === 'postgres'
+          ? 'INSERT INTO todos_backup (original_id, user_id, title, description, completed, sort_order, due_date, completed_minutes, notes, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)'
+          : 'INSERT INTO todos_backup (original_id, user_id, title, description, completed, sort_order, due_date, completed_minutes, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [todo.id, todo.user_id, todo.title, todo.description, db.type === 'postgres' ? todo.completed : Boolean(todo.completed), todo.sort_order, todo.due_date, todo.completed_minutes != null ? todo.completed_minutes : null, todo.notes || '', todo.created_at, todo.updated_at]
+      );
     }
     await db.run(
       db.type === 'postgres'
@@ -673,6 +698,36 @@ app.get('/api/leaderboard', async (req, res) => {
 app.delete('/api/goals/:goalId', async (req, res) => {
   try {
     const { goalId } = req.params;
+    // Backup goal and completions before deletion
+    const goal = await db.get(
+      db.type === 'postgres'
+        ? 'SELECT * FROM goals WHERE id = $1'
+        : 'SELECT * FROM goals WHERE id = ?',
+      [goalId]
+    );
+    if (goal) {
+      await db.run(
+        db.type === 'postgres'
+          ? 'INSERT INTO goals_backup (original_id, user_id, title, description, duration_minutes, type, start_date, end_date, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)'
+          : 'INSERT INTO goals_backup (original_id, user_id, title, description, duration_minutes, type, start_date, end_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [goal.id, goal.user_id, goal.title, goal.description, goal.duration_minutes, goal.type, goal.start_date, goal.end_date, goal.created_at]
+      );
+      // Backup completions
+      const completions = await db.all(
+        db.type === 'postgres'
+          ? 'SELECT * FROM goal_completions WHERE goal_id = $1'
+          : 'SELECT * FROM goal_completions WHERE goal_id = ?',
+        [goalId]
+      );
+      for (const comp of completions) {
+        await db.run(
+          db.type === 'postgres'
+            ? 'INSERT INTO goal_completions_backup (original_id, goal_id, completion_date, duration_minutes, completed_at) VALUES ($1, $2, $3, $4, $5)'
+            : 'INSERT INTO goal_completions_backup (original_id, goal_id, completion_date, duration_minutes, completed_at) VALUES (?, ?, ?, ?, ?)',
+          [comp.id, comp.goal_id, comp.completion_date, comp.duration_minutes, comp.completed_at]
+        );
+      }
+    }
     await db.run(
       db.type === 'postgres' 
         ? 'DELETE FROM goal_completions WHERE goal_id = $1'
@@ -2124,6 +2179,16 @@ app.delete('/api/competition/log/:logId', async (req, res) => {
       `, [goal.id, log.logged_date, log.duration_minutes]);
       
       if (completion) {
+        // Backup completion before deletion
+        const comp = await db.get('SELECT * FROM goal_completions WHERE id = ?', [completion.id]);
+        if (comp) {
+          await db.run(
+            db.type === 'postgres'
+              ? 'INSERT INTO goal_completions_backup (original_id, goal_id, completion_date, duration_minutes, completed_at) VALUES ($1, $2, $3, $4, $5)'
+              : 'INSERT INTO goal_completions_backup (original_id, goal_id, completion_date, duration_minutes, completed_at) VALUES (?, ?, ?, ?, ?)',
+            [comp.id, comp.goal_id, comp.completion_date, comp.duration_minutes, comp.completed_at]
+          );
+        }
         await db.run(`DELETE FROM goal_completions WHERE id = ?`, [completion.id]);
         console.log(`Synced: Removed goal completion for goal "${log.competition_title}"`);
       }
@@ -2376,12 +2441,463 @@ app.post('/api/competition/invitations/:inviteId/decline', async (req, res) => {
   }
 });
 
+// User data export endpoint (backup)
+app.get('/api/users/:userId/export', async (req, res) => {
+  try {
+    const userId = parseInt(req.params.userId, 10);
+    if (!userId) {
+      return res.status(400).json({ success: false, error: 'User ID required' });
+    }
+    // Export all user data
+    const goals = await db.all(
+      db.type === 'postgres'
+        ? 'SELECT * FROM goals WHERE user_id = $1 ORDER BY created_at DESC'
+        : 'SELECT * FROM goals WHERE user_id = ? ORDER BY created_at DESC',
+      [userId]
+    );
+    const completions = await db.all(
+      db.type === 'postgres'
+        ? `SELECT gc.* FROM goal_completions gc 
+           JOIN goals g ON g.id = gc.goal_id 
+           WHERE g.user_id = $1 ORDER BY gc.completion_date DESC`
+        : `SELECT gc.* FROM goal_completions gc 
+           JOIN goals g ON g.id = gc.goal_id 
+           WHERE g.user_id = ? ORDER BY gc.completion_date DESC`,
+      [userId]
+    );
+    const todos = await db.all(
+      db.type === 'postgres'
+        ? 'SELECT * FROM todos WHERE user_id = $1 ORDER BY sort_order ASC'
+        : 'SELECT * FROM todos WHERE user_id = ? ORDER BY sort_order ASC',
+      [userId]
+    );
+    const dayNotes = await db.all(
+      db.type === 'postgres'
+        ? 'SELECT * FROM day_notes WHERE user_id = $1 ORDER BY note_date DESC'
+        : 'SELECT * FROM day_notes WHERE user_id = ? ORDER BY note_date DESC',
+      [userId]
+    );
+    const user = await db.get(
+      db.type === 'postgres'
+        ? 'SELECT id, username, email FROM users WHERE id = $1'
+        : 'SELECT id, username, email FROM users WHERE id = ?',
+      [userId]
+    );
+    const backupData = {
+      exportDate: new Date().toISOString(),
+      user: user ? { id: user.id, username: user.username, email: user.email } : null,
+      goals: goals || [],
+      completions: completions || [],
+      todos: todos || [],
+      dayNotes: dayNotes || []
+    };
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="user-${userId}-backup-${Date.now()}.json"`);
+    res.json(backupData);
+  } catch (error) {
+    console.error('Export user data error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Restore deleted data endpoint
+app.post('/api/users/:userId/restore', async (req, res) => {
+  try {
+    const userId = parseInt(req.params.userId, 10);
+    const { type, backupId } = req.body; // type: 'goal', 'todo', 'dayNote', backupId: backup table ID
+    if (!userId || !type || !backupId) {
+      return res.status(400).json({ success: false, error: 'User ID, type, and backup ID required' });
+    }
+    if (type === 'goal') {
+      const backup = await db.get(
+        db.type === 'postgres'
+          ? 'SELECT * FROM goals_backup WHERE id = $1 AND user_id = $2'
+          : 'SELECT * FROM goals_backup WHERE id = ? AND user_id = ?',
+        [backupId, userId]
+      );
+      if (!backup) {
+        return res.status(404).json({ success: false, error: 'Backup not found' });
+      }
+      // Check if goal already exists
+      const existing = await db.get(
+        db.type === 'postgres'
+          ? 'SELECT id FROM goals WHERE id = $1'
+          : 'SELECT id FROM goals WHERE id = ?',
+        [backup.original_id]
+      );
+      if (existing) {
+        return res.status(400).json({ success: false, error: 'Goal already exists' });
+      }
+      // Restore goal
+      await db.run(
+        db.type === 'postgres'
+          ? 'INSERT INTO goals (id, user_id, title, description, duration_minutes, type, start_date, end_date, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)'
+          : 'INSERT INTO goals (id, user_id, title, description, duration_minutes, type, start_date, end_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [backup.original_id, backup.user_id, backup.title, backup.description, backup.duration_minutes, backup.type, backup.start_date, backup.end_date, backup.created_at]
+      );
+      // Restore completions
+      const compBackups = await db.all(
+        db.type === 'postgres'
+          ? 'SELECT * FROM goal_completions_backup WHERE goal_id = $1'
+          : 'SELECT * FROM goal_completions_backup WHERE goal_id = ?',
+        [backup.original_id]
+      );
+      for (const comp of compBackups) {
+        await db.run(
+          db.type === 'postgres'
+            ? 'INSERT INTO goal_completions (id, goal_id, completion_date, duration_minutes, completed_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING'
+            : 'INSERT OR IGNORE INTO goal_completions (id, goal_id, completion_date, duration_minutes, completed_at) VALUES (?, ?, ?, ?, ?)',
+          [comp.original_id, comp.goal_id, comp.completion_date, comp.duration_minutes, comp.completed_at]
+        );
+      }
+      res.json({ success: true, message: 'Goal restored successfully' });
+    } else if (type === 'todo') {
+      const backup = await db.get(
+        db.type === 'postgres'
+          ? 'SELECT * FROM todos_backup WHERE id = $1 AND user_id = $2'
+          : 'SELECT * FROM todos_backup WHERE id = ? AND user_id = ?',
+        [backupId, userId]
+      );
+      if (!backup) {
+        return res.status(404).json({ success: false, error: 'Backup not found' });
+      }
+      // Check if todo already exists
+      const existing = await db.get(
+        db.type === 'postgres'
+          ? 'SELECT id FROM todos WHERE id = $1'
+          : 'SELECT id FROM todos WHERE id = ?',
+        [backup.original_id]
+      );
+      if (existing) {
+        return res.status(400).json({ success: false, error: 'Todo already exists' });
+      }
+      // Restore todo
+      await db.run(
+        db.type === 'postgres'
+          ? 'INSERT INTO todos (id, user_id, title, description, completed, sort_order, due_date, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)'
+          : 'INSERT INTO todos (id, user_id, title, description, completed, sort_order, due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [backup.original_id, backup.user_id, backup.title, backup.description, db.type === 'postgres' ? backup.completed : (backup.completed ? 1 : 0), backup.sort_order, backup.due_date, backup.created_at, backup.updated_at]
+      );
+      res.json({ success: true, message: 'Todo restored successfully' });
+    } else if (type === 'dayNote') {
+      const backup = await db.get(
+        db.type === 'postgres'
+          ? 'SELECT * FROM day_notes_backup WHERE id = $1 AND user_id = $2'
+          : 'SELECT * FROM day_notes_backup WHERE id = ? AND user_id = ?',
+        [backupId, userId]
+      );
+      if (!backup) {
+        return res.status(404).json({ success: false, error: 'Backup not found' });
+      }
+      // Check if day note already exists
+      const existing = await db.get(
+        db.type === 'postgres'
+          ? 'SELECT id FROM day_notes WHERE id = $1'
+          : 'SELECT id FROM day_notes WHERE id = ?',
+        [backup.original_id]
+      );
+      if (existing) {
+        return res.status(400).json({ success: false, error: 'Day note already exists' });
+      }
+      // Restore day note
+      await db.run(
+        db.type === 'postgres'
+          ? 'INSERT INTO day_notes (id, user_id, note_date, accomplishments, productivity_rating, mood_rating, notes, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)'
+          : 'INSERT INTO day_notes (id, user_id, note_date, accomplishments, productivity_rating, mood_rating, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [backup.original_id, backup.user_id, backup.note_date, backup.accomplishments, backup.productivity_rating, backup.mood_rating, backup.notes, backup.created_at, backup.updated_at]
+      );
+      res.json({ success: true, message: 'Day note restored successfully' });
+    } else {
+      return res.status(400).json({ success: false, error: 'Invalid restore type' });
+    }
+  } catch (error) {
+    console.error('Restore data error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// List backups for a user
+app.get('/api/users/:userId/backups', async (req, res) => {
+  try {
+    const userId = parseInt(req.params.userId, 10);
+    if (!userId) {
+      return res.status(400).json({ success: false, error: 'User ID required' });
+    }
+    const goalBackups = await db.all(
+      db.type === 'postgres'
+        ? 'SELECT id, original_id, title, deleted_at FROM goals_backup WHERE user_id = $1 ORDER BY deleted_at DESC'
+        : 'SELECT id, original_id, title, deleted_at FROM goals_backup WHERE user_id = ? ORDER BY deleted_at DESC',
+      [userId]
+    );
+    const todoBackups = await db.all(
+      db.type === 'postgres'
+        ? 'SELECT id, original_id, title, deleted_at FROM todos_backup WHERE user_id = $1 ORDER BY deleted_at DESC'
+        : 'SELECT id, original_id, title, deleted_at FROM todos_backup WHERE user_id = ? ORDER BY deleted_at DESC',
+      [userId]
+    );
+    const dayNoteBackups = await db.all(
+      db.type === 'postgres'
+        ? 'SELECT id, original_id, note_date, deleted_at FROM day_notes_backup WHERE user_id = $1 ORDER BY deleted_at DESC'
+        : 'SELECT id, original_id, note_date, deleted_at FROM day_notes_backup WHERE user_id = ? ORDER BY deleted_at DESC',
+      [userId]
+    );
+    res.json({
+      success: true,
+      backups: {
+        goals: goalBackups || [],
+        todos: todoBackups || [],
+        dayNotes: dayNoteBackups || []
+      }
+    });
+  } catch (error) {
+    console.error('List backups error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Automatic backup function - creates full backup for all users
+async function createAutomaticBackups() {
+  try {
+    console.log('🔄 Starting automatic backup process...');
+    const users = await db.all(
+      db.type === 'postgres'
+        ? 'SELECT id FROM users'
+        : 'SELECT id FROM users'
+    );
+    
+    if (!users || users.length === 0) {
+      console.log('ℹ️  No users found, skipping backup');
+      return;
+    }
+    
+    let backedUp = 0;
+    for (const user of users) {
+      try {
+        const userId = user.id;
+        // Get all user data
+        const goals = await db.all(
+          db.type === 'postgres'
+            ? 'SELECT * FROM goals WHERE user_id = $1'
+            : 'SELECT * FROM goals WHERE user_id = ?',
+          [userId]
+        );
+        const completions = await db.all(
+          db.type === 'postgres'
+            ? `SELECT gc.* FROM goal_completions gc 
+               JOIN goals g ON g.id = gc.goal_id 
+               WHERE g.user_id = $1`
+            : `SELECT gc.* FROM goal_completions gc 
+               JOIN goals g ON g.id = gc.goal_id 
+               WHERE g.user_id = ?`,
+          [userId]
+        );
+        const todos = await db.all(
+          db.type === 'postgres'
+            ? 'SELECT * FROM todos WHERE user_id = $1'
+            : 'SELECT * FROM todos WHERE user_id = ?',
+          [userId]
+        );
+        const dayNotes = await db.all(
+          db.type === 'postgres'
+            ? 'SELECT * FROM day_notes WHERE user_id = $1'
+            : 'SELECT * FROM day_notes WHERE user_id = ?',
+          [userId]
+        );
+        const userData = await db.get(
+          db.type === 'postgres'
+            ? 'SELECT id, username, email FROM users WHERE id = $1'
+            : 'SELECT id, username, email FROM users WHERE id = ?',
+          [userId]
+        );
+        
+        const backupData = {
+          exportDate: new Date().toISOString(),
+          user: userData ? { id: userData.id, username: userData.username, email: userData.email } : null,
+          goals: goals || [],
+          completions: completions || [],
+          todos: todos || [],
+          dayNotes: dayNotes || []
+        };
+        
+        // Store backup in database
+        const backupJson = JSON.stringify(backupData);
+        await db.run(
+          db.type === 'postgres'
+            ? 'INSERT INTO user_backups (user_id, backup_data) VALUES ($1, $2::jsonb)'
+            : 'INSERT INTO user_backups (user_id, backup_data) VALUES (?, ?)',
+          [userId, backupJson]
+        );
+        
+        backedUp++;
+        
+        // Keep only last 30 backups per user (to prevent database bloat)
+        if (db.type === 'postgres') {
+          await db.run(
+            `DELETE FROM user_backups 
+             WHERE user_id = $1 AND id NOT IN (
+               SELECT id FROM user_backups 
+               WHERE user_id = $1 
+               ORDER BY backup_date DESC 
+               LIMIT 30
+             )`,
+            [userId]
+          );
+        } else {
+          // SQLite: Get IDs to keep, then delete others
+          const keepBackups = await db.all(
+            'SELECT id FROM user_backups WHERE user_id = ? ORDER BY backup_date DESC LIMIT 30',
+            [userId]
+          );
+          if (keepBackups && keepBackups.length > 0) {
+            const keepIds = keepBackups.map(b => b.id).join(',');
+            await db.run(
+              `DELETE FROM user_backups WHERE user_id = ? AND id NOT IN (${keepIds})`,
+              [userId]
+            );
+          }
+        }
+      } catch (userError) {
+        console.error(`❌ Error backing up user ${user.id}:`, userError.message);
+        // Continue with other users even if one fails
+      }
+    }
+    
+    console.log(`✅ Automatic backup completed: ${backedUp} users backed up`);
+  } catch (error) {
+    console.error('❌ Automatic backup error:', error.message);
+  }
+}
+
+// Manual backup trigger endpoint (for admin/testing)
+app.post('/api/admin/backup-all', async (req, res) => {
+  try {
+    await createAutomaticBackups();
+    res.json({ success: true, message: 'Backup process completed' });
+  } catch (error) {
+    console.error('Manual backup error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get user's backup history
+app.get('/api/users/:userId/backup-history', async (req, res) => {
+  try {
+    const userId = parseInt(req.params.userId, 10);
+    if (!userId) {
+      return res.status(400).json({ success: false, error: 'User ID required' });
+    }
+    const backups = await db.all(
+      db.type === 'postgres'
+        ? 'SELECT id, backup_date FROM user_backups WHERE user_id = $1 ORDER BY backup_date DESC LIMIT 30'
+        : 'SELECT id, backup_date FROM user_backups WHERE user_id = ? ORDER BY backup_date DESC LIMIT 30',
+      [userId]
+    );
+    res.json({ success: true, backups: backups || [] });
+  } catch (error) {
+    console.error('Get backup history error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Restore from backup snapshot
+app.post('/api/users/:userId/restore-from-backup', async (req, res) => {
+  try {
+    const userId = parseInt(req.params.userId, 10);
+    const { backupId } = req.body;
+    if (!userId || !backupId) {
+      return res.status(400).json({ success: false, error: 'User ID and backup ID required' });
+    }
+    const backup = await db.get(
+      db.type === 'postgres'
+        ? 'SELECT backup_data FROM user_backups WHERE id = $1 AND user_id = $2'
+        : 'SELECT backup_data FROM user_backups WHERE id = ? AND user_id = ?',
+      [backupId, userId]
+    );
+    if (!backup) {
+      return res.status(404).json({ success: false, error: 'Backup not found' });
+    }
+    const backupData = typeof backup.backup_data === 'string' 
+      ? JSON.parse(backup.backup_data) 
+      : backup.backup_data;
+    
+    // Restore goals
+    for (const goal of backupData.goals || []) {
+      await db.run(
+        db.type === 'postgres'
+          ? `INSERT INTO goals (id, user_id, title, description, duration_minutes, type, start_date, end_date, created_at) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
+             ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description`
+          : `INSERT OR REPLACE INTO goals (id, user_id, title, description, duration_minutes, type, start_date, end_date, created_at) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [goal.id, goal.user_id, goal.title, goal.description, goal.duration_minutes, goal.type, goal.start_date, goal.end_date, goal.created_at]
+      );
+    }
+    
+    // Restore completions
+    for (const comp of backupData.completions || []) {
+      await db.run(
+        db.type === 'postgres'
+          ? `INSERT INTO goal_completions (id, goal_id, completion_date, duration_minutes, completed_at) 
+             VALUES ($1, $2, $3, $4, $5) 
+             ON CONFLICT (goal_id, completion_date) DO UPDATE SET duration_minutes = EXCLUDED.duration_minutes`
+          : `INSERT OR REPLACE INTO goal_completions (id, goal_id, completion_date, duration_minutes, completed_at) 
+             VALUES (?, ?, ?, ?, ?)`,
+        [comp.id, comp.goal_id, comp.completion_date, comp.duration_minutes, comp.completed_at]
+      );
+    }
+    
+    // Restore todos
+    for (const todo of backupData.todos || []) {
+      await db.run(
+        db.type === 'postgres'
+          ? `INSERT INTO todos (id, user_id, title, description, completed, sort_order, due_date, created_at, updated_at) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
+             ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description`
+          : `INSERT OR REPLACE INTO todos (id, user_id, title, description, completed, sort_order, due_date, created_at, updated_at) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [todo.id, todo.user_id, todo.title, todo.description, db.type === 'postgres' ? todo.completed : (todo.completed ? 1 : 0), todo.sort_order, todo.due_date, todo.created_at, todo.updated_at]
+      );
+    }
+    
+    // Restore day notes
+    for (const note of backupData.dayNotes || []) {
+      await db.run(
+        db.type === 'postgres'
+          ? `INSERT INTO day_notes (id, user_id, note_date, accomplishments, productivity_rating, mood_rating, notes, created_at, updated_at) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
+             ON CONFLICT (user_id, note_date) DO UPDATE SET accomplishments = EXCLUDED.accomplishments, notes = EXCLUDED.notes`
+          : `INSERT OR REPLACE INTO day_notes (id, user_id, note_date, accomplishments, productivity_rating, mood_rating, notes, created_at, updated_at) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [note.id, note.user_id, note.note_date, note.accomplishments, note.productivity_rating, note.mood_rating, note.notes, note.created_at, note.updated_at]
+      );
+    }
+    
+    res.json({ success: true, message: 'Data restored from backup successfully' });
+  } catch (error) {
+    console.error('Restore from backup error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 
 // Start server immediately - don't wait for DB init
 app.listen(PORT, HOST, () => {
   console.log(`🚀 Goals Tracker running on http://${HOST}:${PORT}`);
+  
+  // Run automatic backup immediately on startup (for testing)
+  // Then schedule daily backups (every 24 hours)
+  setTimeout(() => {
+    createAutomaticBackups();
+  }, 60000); // Wait 1 minute after startup to ensure DB is ready
+  
+  // Schedule daily backups (every 24 hours = 86400000 ms)
+  setInterval(() => {
+    createAutomaticBackups();
+  }, 24 * 60 * 60 * 1000); // 24 hours
+  
+  console.log('📦 Automatic backups scheduled: Daily at midnight (24h intervals)');
   console.log(`📊 Using ${db.type.toUpperCase()} database`);
   console.log(`✅ Server is ready to accept connections`);
   console.log(`🔍 Health check: http://${HOST}:${PORT}/api/health`);

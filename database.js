@@ -203,8 +203,92 @@ if (dbType === 'postgres') {
           completed BOOLEAN DEFAULT FALSE,
           sort_order INTEGER DEFAULT 0,
           due_date DATE,
+          completed_minutes INTEGER,
+          notes TEXT,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+      `);
+      try {
+        await db.run('ALTER TABLE todos ADD COLUMN completed_minutes INTEGER');
+      } catch (_) {}
+      try {
+        await db.run('ALTER TABLE todos ADD COLUMN notes TEXT');
+      } catch (_) {}
+
+      // Backup tables for deleted records
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS goals_backup (
+          id SERIAL PRIMARY KEY,
+          original_id INTEGER NOT NULL,
+          user_id INTEGER NOT NULL,
+          title VARCHAR(255) NOT NULL,
+          description TEXT,
+          duration_minutes INTEGER,
+          type VARCHAR(20) NOT NULL,
+          start_date DATE NOT NULL,
+          end_date DATE,
+          created_at TIMESTAMP,
+          deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS goal_completions_backup (
+          id SERIAL PRIMARY KEY,
+          original_id INTEGER NOT NULL,
+          goal_id INTEGER NOT NULL,
+          completion_date DATE NOT NULL,
+          duration_minutes INTEGER NOT NULL,
+          completed_at TIMESTAMP,
+          deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS todos_backup (
+          id SERIAL PRIMARY KEY,
+          original_id INTEGER NOT NULL,
+          user_id INTEGER NOT NULL,
+          title TEXT NOT NULL,
+          description TEXT,
+          completed BOOLEAN DEFAULT FALSE,
+          sort_order INTEGER DEFAULT 0,
+          due_date DATE,
+          completed_minutes INTEGER,
+          notes TEXT,
+          created_at TIMESTAMP,
+          updated_at TIMESTAMP,
+          deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      try { await db.run('ALTER TABLE todos_backup ADD COLUMN completed_minutes INTEGER'); } catch (_) {}
+      try { await db.run('ALTER TABLE todos_backup ADD COLUMN notes TEXT'); } catch (_) {}
+
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS day_notes_backup (
+          id SERIAL PRIMARY KEY,
+          original_id INTEGER NOT NULL,
+          user_id INTEGER NOT NULL,
+          note_date DATE NOT NULL,
+          accomplishments TEXT,
+          productivity_rating INTEGER,
+          mood_rating INTEGER,
+          notes TEXT,
+          created_at TIMESTAMP,
+          updated_at TIMESTAMP,
+          deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // Full backup snapshots table (stores periodic backups)
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS user_backups (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL,
+          backup_data JSONB NOT NULL,
+          backup_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
       `);
@@ -408,8 +492,92 @@ if (dbType === 'postgres') {
           completed INTEGER DEFAULT 0,
           sort_order INTEGER DEFAULT 0,
           due_date DATE,
+          completed_minutes INTEGER,
+          notes TEXT,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+      `);
+      try {
+        await db.run('ALTER TABLE todos ADD COLUMN completed_minutes INTEGER');
+      } catch (_) {}
+      try {
+        await db.run('ALTER TABLE todos ADD COLUMN notes TEXT');
+      } catch (_) {}
+
+      // Backup tables for deleted records
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS goals_backup (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          original_id INTEGER NOT NULL,
+          user_id INTEGER NOT NULL,
+          title TEXT NOT NULL,
+          description TEXT,
+          duration_minutes INTEGER,
+          type TEXT NOT NULL,
+          start_date DATE NOT NULL,
+          end_date DATE,
+          created_at DATETIME,
+          deleted_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS goal_completions_backup (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          original_id INTEGER NOT NULL,
+          goal_id INTEGER NOT NULL,
+          completion_date DATE NOT NULL,
+          duration_minutes INTEGER NOT NULL,
+          completed_at DATETIME,
+          deleted_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS todos_backup (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          original_id INTEGER NOT NULL,
+          user_id INTEGER NOT NULL,
+          title TEXT NOT NULL,
+          description TEXT,
+          completed INTEGER DEFAULT 0,
+          sort_order INTEGER DEFAULT 0,
+          due_date DATE,
+          completed_minutes INTEGER,
+          notes TEXT,
+          created_at DATETIME,
+          updated_at DATETIME,
+          deleted_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      try { await db.run('ALTER TABLE todos_backup ADD COLUMN completed_minutes INTEGER'); } catch (_) {}
+      try { await db.run('ALTER TABLE todos_backup ADD COLUMN notes TEXT'); } catch (_) {}
+
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS day_notes_backup (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          original_id INTEGER NOT NULL,
+          user_id INTEGER NOT NULL,
+          note_date DATE NOT NULL,
+          accomplishments TEXT,
+          productivity_rating INTEGER,
+          mood_rating INTEGER,
+          notes TEXT,
+          created_at DATETIME,
+          updated_at DATETIME,
+          deleted_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // Full backup snapshots table (stores periodic backups)
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS user_backups (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          backup_data TEXT NOT NULL,
+          backup_date DATETIME DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (user_id) REFERENCES users(id)
         )
       `);

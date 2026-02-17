@@ -985,10 +985,25 @@ function createGoalCard(goal, dateStr = null) {
     const completion = goal.completions?.find(c => c.completion_date === dateStr);
     const isCompleted = !!completion;
     
-    // For My Goals view (when dateStr is null), use context date or actual today
-    const effectiveDate = contextDate || new Date();
+    // For My Goals view (when dateStr is null), use the same period reference as the list filter
+    // so "Today" = selected calendar date (or actual today), "Yesterday" = that date minus one
+    const period = document.getElementById('goals-period')?.value || 'today';
+    const periodRef = contextDate || new Date();
+    let effectiveDate = periodRef;
+    if (period === 'yesterday') {
+        const yesterday = new Date(periodRef);
+        yesterday.setDate(yesterday.getDate() - 1);
+        effectiveDate = yesterday;
+    } else if (period === 'today') {
+        effectiveDate = periodRef;
+    }
     const effectiveDateStr = dateStr || formatDate(effectiveDate);
-    const effectiveCompletion = goal.completions?.find(c => c.completion_date === effectiveDateStr);
+    const effectiveCompletion = goal.completions?.find(c => {
+        const raw = c.completion_date != null ? String(c.completion_date).trim().slice(0, 10) : '';
+        const norm = c.completion_date_ymd || (c.completion_date ? normalizeToLocalYMD(c.completion_date) : '') || raw;
+        if (!raw && !norm) return false;
+        return norm === effectiveDateStr || raw === effectiveDateStr;
+    });
     const hasCompletionToday = !!effectiveCompletion;
     // Only treat as "done" (green/completed style) when 100%+ or no target with any time
     const isCompletedToday = hasDuration
@@ -1148,10 +1163,11 @@ async function checkMidnightAutoFail() {
                 // Check if goal was completed today
                 const completionsResponse = await fetch(`${API_URL}/api/goals/${goal.id}/completions`);
                 const completions = await completionsResponse.json();
-                completions.forEach(c => {
-                    c.completion_date = normalizeToLocalYMD(c.completion_date);
+                const todayCompletion = completions.find(c => {
+                    const raw = c.completion_date != null ? String(c.completion_date).trim().slice(0, 10) : '';
+                    const norm = normalizeToLocalYMD(c.completion_date) || raw;
+                    return norm === today || raw === today;
                 });
-                const todayCompletion = completions.find(c => c.completion_date === today);
                 
                 if (!todayCompletion && goal.type !== 'one-time') {
                     // Goal was not completed - mark as failed (you can add a failed status in the database later)
@@ -1477,9 +1493,9 @@ async function loadGoals() {
                 const completionsResponse = await fetch(`${API_URL}/api/goals/${goal.id}/completions`);
                 const completions = await completionsResponse.json();
                 goal.completions = Array.isArray(completions) ? completions : [];
-                // Normalize completion dates too
+                // Keep raw completion_date from API; set completion_date_ymd for consistent YYYY-MM-DD (local)
                 goal.completions.forEach(c => {
-                    c.completion_date = normalizeToLocalYMD(c.completion_date);
+                    c.completion_date_ymd = normalizeToLocalYMD(c.completion_date);
                 });
                 console.log(`  Goal "${goal.title}" completions:`, goal.completions);
             } catch (error) {
@@ -1507,8 +1523,12 @@ async function renderGoalsList() {
     const effectiveDate = contextDate || new Date();
     const effectiveDateStr = formatDate(effectiveDate);
     
+    const period = document.getElementById('goals-period')?.value || 'today';
+    // When showing a specific day (Yesterday/Today), show all goals with activity that day — ignore type filter
+    // so the user sees every goal they logged, not just one type
     let filteredGoals = allGoals;
-    if (currentFilter !== 'all') {
+    const isSingleDayPeriod = period === 'yesterday' || period === 'today';
+    if (!isSingleDayPeriod && currentFilter !== 'all') {
         if (currentFilter === 'daily') {
             filteredGoals = allGoals.filter(g => g.type === 'daily' || g.type === 'one-time');
         } else {
@@ -1516,21 +1536,36 @@ async function renderGoalsList() {
         }
     }
     
-    // Filter by time period: show goals whose *goal date* (start_date–end_date) overlaps the period
-    const period = document.getElementById('goals-period')?.value || 'today';
-    // For "Today" use actual today so the total always matches goals due today
-    const periodRefDate = period === 'today' ? new Date() : effectiveDate;
+    // Filter by time period: use the calendar's selected date (contextDate) when set, so "Today" = selected day
+    // and goals you add for the selected day show up when you choose "Today" in My Goals
+    const periodRefDate = effectiveDate;
     if (period !== 'all') {
         const { startDate, endDate } = getStatisticsDates(period, periodRefDate);
+        const isSingleDay = (period === 'yesterday' || period === 'today') && startDate === endDate;
         filteredGoals = filteredGoals.filter(goal => {
+            // For yesterday/today: ALWAYS include goal if it has ANY completion on that date (single source of truth)
+            if (isSingleDay && goal.completions && Array.isArray(goal.completions)) {
+                if (goal.completions.some(c => completionMatchesDate(c, startDate)))
+                    return true;
+            }
+            
             const rawStart = goal.start_date != null ? goal.start_date : '';
             const rawEnd = goal.end_date != null ? goal.end_date : rawStart;
-            const goalStart = (normalizeToLocalYMD(rawStart) || String(rawStart).trim().slice(0, 10) || '').slice(0, 10);
-            const goalEnd = (normalizeToLocalYMD(rawEnd) || String(rawEnd).trim().slice(0, 10) || goalStart || '').slice(0, 10) || goalStart;
+            const rawStartStr = String(rawStart).trim().slice(0, 10);
+            const rawEndStr = String(rawEnd).trim().slice(0, 10) || rawStartStr;
+            const goalStart = (normalizeToLocalYMD(rawStart) || rawStartStr || '').slice(0, 10);
+            const goalEnd = (normalizeToLocalYMD(rawEnd) || rawEndStr || goalStart || '').slice(0, 10) || goalStart;
             if (!goalStart || goalStart.length < 10) return false;
-            const goalInPeriod = goalStart <= endDate && goalEnd >= startDate;
+            
+            let goalInPeriod = goalStart <= endDate && goalEnd >= startDate;
+            if (!goalInPeriod && isSingleDay) {
+                goalInPeriod = rawStartStr === startDate || rawEndStr === startDate || (rawStartStr <= startDate && (rawEndStr >= startDate || !rawEndStr));
+            }
             return goalInPeriod;
         });
+        if (isSingleDay && typeof console !== 'undefined' && console.log) {
+            console.log('[My Goals]', period, 'date=' + startDate, 'totalGoals=' + (allGoals && allGoals.length) + '', 'shown=' + filteredGoals.length);
+        }
     }
     
     // Total = sum of targets of exactly the goals we are about to render (no separate logic)
@@ -1684,17 +1719,14 @@ function openCompleteModal(goalId, date, targetDuration, existingDuration) {
         
         console.log('Looking for completion with date:', targetDateStr);
         
-        // Try to find completion by matching date
+        // Try to find completion by matching date (support raw API date and completion_date_ymd)
         actualCompletion = goal.completions.find(c => {
-            if (!c.completion_date) return false;
-            
-            const completionDate = c.completion_date;
-            const completionDateStr = typeof completionDate === 'string' 
-                ? completionDate.split('T')[0] 
-                : formatDate(completionDate);
-            
-            console.log('  Comparing:', completionDateStr, 'with', targetDateStr, 'Match:', completionDateStr === targetDateStr);
-            return completionDateStr === targetDateStr;
+            const raw = c.completion_date != null ? String(c.completion_date).trim().slice(0, 10) : '';
+            const norm = c.completion_date_ymd || (c.completion_date ? normalizeToLocalYMD(c.completion_date) : '') || raw;
+            if (!raw && !norm) return false;
+            const match = norm === targetDateStr || raw === targetDateStr;
+            console.log('  Comparing:', norm, '|', raw, 'with', targetDateStr, 'Match:', match);
+            return match;
         });
         
         // If no exact match and it's a one-time goal, use the first (and likely only) completion
@@ -2059,6 +2091,21 @@ function closeModal() {
 
 function isYMDString(value) {
     return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+/** Single source of truth: does this completion fall on the given YYYY-MM-DD date? Handles raw, normalized, and UTC. */
+function completionMatchesDate(c, yyyyMmDd) {
+    if (!yyyyMmDd || yyyyMmDd.length < 10) return false;
+    const raw = c.completion_date != null ? String(c.completion_date).trim().slice(0, 10) : '';
+    const norm = c.completion_date_ymd || (c.completion_date ? normalizeToLocalYMD(c.completion_date) : '') || raw;
+    if (norm === yyyyMmDd || raw === yyyyMmDd) return true;
+    const d = new Date(c.completion_date);
+    if (!Number.isNaN(d.getTime())) {
+        const utcYmd = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+        if (utcYmd === yyyyMmDd) return true;
+    }
+    if (raw && raw.length >= 10 && raw.slice(0, 10) === yyyyMmDd) return true;
+    return false;
 }
 
 function parseYMDToLocalDate(ymd) {
@@ -4136,7 +4183,11 @@ async function loadTodos() {
         const response = await fetch(`${API_URL}/api/todos?userId=${currentUser.id}`);
         const data = await response.json();
         if (data.success) {
-            todos = data.todos || [];
+            todos = (data.todos || []).map(t => ({
+                ...t,
+                completedMinutes: t.completedMinutes != null ? t.completedMinutes : (t.completed_minutes != null ? t.completed_minutes : null),
+                notes: t.notes != null ? t.notes : (t.notes !== undefined ? t.notes : '')
+            }));
             renderTodos();
         }
     } catch (error) {
@@ -4159,9 +4210,14 @@ function renderTodos() {
     list.innerHTML = todos.map((todo, index) => {
         const number = index + 1;
         const dueDateDisplay = todo.dueDate ? (() => {
-            const [y, m, d] = todo.dueDate.split('-').map(Number);
+            const s = String(todo.dueDate).trim().slice(0, 10);
+            const [y, m, d] = s.split('-').map(Number);
             return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
         })() : null;
+        const mins = todo.completedMinutes != null ? Number(todo.completedMinutes) : null;
+        const timeStr = mins != null && mins > 0 ? (mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`) : '-';
+        const timeEmpty = timeStr === '-';
+        const notes = (todo.notes || '').trim();
         return `
         <div class="todo-item" data-todo-id="${todo.id}" draggable="true">
             <div class="todo-number">${number}</div>
@@ -4172,8 +4228,11 @@ function renderTodos() {
                     <div class="todo-title ${todo.completed ? 'completed' : ''}">${escapeHtml(todo.title)}</div>
                     ${dueDateDisplay ? `<div class="todo-due-date">${dueDateDisplay}</div>` : ''}
                 </div>
+                <div class="todo-time-taken ${timeEmpty ? 'todo-time-empty' : ''}">Time: ${timeStr}</div>
                 ${todo.description ? `<div class="todo-description ${todo.completed ? 'completed' : ''}">${escapeHtml(todo.description)}</div>` : ''}
+                ${notes ? `<div class="todo-notes">${escapeHtml(notes)}</div>` : ''}
             </div>
+            <button class="todo-edit" data-todo-id="${todo.id}" aria-label="Edit to do">✎</button>
             <button class="todo-delete" data-todo-id="${todo.id}" aria-label="Delete to do">×</button>
         </div>
     `;
@@ -4184,6 +4243,9 @@ function renderTodos() {
         cb.addEventListener('change', (e) => toggleTodo(parseInt(e.target.dataset.todoId, 10)));
     });
     
+    list.querySelectorAll('.todo-edit').forEach(btn => {
+        btn.addEventListener('click', (e) => { e.stopPropagation(); openEditTodoModal(parseInt(e.target.dataset.todoId, 10)); });
+    });
     list.querySelectorAll('.todo-delete').forEach(btn => {
         btn.addEventListener('click', (e) => deleteTodo(parseInt(e.target.dataset.todoId, 10)));
     });
@@ -4264,11 +4326,28 @@ async function reorderTodos() {
 async function toggleTodo(todoId) {
     const todo = todos.find(t => t.id === todoId);
     if (!todo) return;
+    const becomingCompleted = !todo.completed;
+    let completedMinutes = todo.completedMinutes;
+    if (becomingCompleted) {
+        const raw = prompt('Time it took to complete? (e.g. 30 for minutes, 1.5h for hours). Leave empty to skip.');
+        if (raw !== null && raw.trim() !== '') {
+            const s = raw.trim().toLowerCase();
+            const isHours = s.endsWith('h') || s.endsWith('hr') || s.endsWith('hour') || s.endsWith('hours');
+            const num = parseFloat(isHours ? s.replace(/[a-z]+$/, '').trim() : s);
+            if (!isNaN(num) && num >= 0)
+                completedMinutes = isHours ? Math.round(num * 60) : Math.round(num);
+        }
+    } else {
+        completedMinutes = undefined;
+    }
     try {
+        const body = { userId: currentUser.id, completed: becomingCompleted };
+        if (becomingCompleted && completedMinutes != null) body.completedMinutes = completedMinutes;
+        if (!becomingCompleted) body.completedMinutes = null;
         const response = await fetch(`${API_URL}/api/todos/${todoId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: currentUser.id, completed: !todo.completed })
+            body: JSON.stringify(body)
         });
         const data = await response.json();
         if (data.success) {
@@ -4400,6 +4479,142 @@ function openNewTodoModal() {
 
 function closeNewTodoModal() {
     const modal = document.getElementById('new-todo-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function openEditTodoModal(todoId) {
+    const todo = todos.find(t => t.id === todoId);
+    if (!todo) return;
+    let modal = document.getElementById('edit-todo-modal');
+    if (!modal) {
+        const modalHtml = `
+            <div id="edit-todo-modal" class="modal">
+                <div class="modal-content todo-modal-content">
+                    <div class="modal-header">
+                        <h3>Edit To do</h3>
+                        <button class="modal-close" id="edit-todo-modal-close" aria-label="Close">×</button>
+                    </div>
+                    <form id="edit-todo-form">
+                        <input type="hidden" id="edit-todo-id">
+                        <div class="form-group">
+                            <label>Title *</label>
+                            <input type="text" id="edit-todo-title" required placeholder="Title">
+                        </div>
+                        <div class="form-group">
+                            <label>Description</label>
+                            <textarea id="edit-todo-description" rows="3" placeholder="Optional details..."></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Due Date</label>
+                            <input type="date" id="edit-todo-due-date" class="todo-date-input">
+                        </div>
+                        <div class="form-group form-group-highlight todo-time-row">
+                            <label>Time it took to complete</label>
+                            <div class="todo-time-input-wrap">
+                                <input type="number" id="edit-todo-completed-value" min="0" step="0.5" placeholder="0" class="todo-time-value-input" aria-label="Time value">
+                                <select id="edit-todo-completed-unit" class="todo-time-unit-select" aria-label="Minutes or hours">
+                                    <option value="minutes">min</option>
+                                    <option value="hours">hrs</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Notes</label>
+                            <textarea id="edit-todo-notes" rows="2" placeholder="Add notes..."></textarea>
+                        </div>
+                        <div class="modal-actions">
+                            <button type="button" class="btn-secondary" id="edit-todo-cancel">Cancel</button>
+                            <button type="submit" class="btn-primary">Save</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        `;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        modal = document.getElementById('edit-todo-modal');
+        document.getElementById('edit-todo-modal-close').addEventListener('click', closeEditTodoModal);
+        document.getElementById('edit-todo-cancel').addEventListener('click', closeEditTodoModal);
+        document.getElementById('edit-todo-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = parseInt(document.getElementById('edit-todo-id').value, 10);
+            const title = document.getElementById('edit-todo-title').value.trim();
+            const description = document.getElementById('edit-todo-description').value.trim();
+            const dueDate = document.getElementById('edit-todo-due-date').value || null;
+            const notes = document.getElementById('edit-todo-notes').value.trim();
+            const valueRaw = document.getElementById('edit-todo-completed-value').value.trim();
+            const unit = document.getElementById('edit-todo-completed-unit').value;
+            let completedMinutes = null;
+            if (valueRaw !== '') {
+                const val = parseFloat(valueRaw);
+                if (!isNaN(val) && val >= 0)
+                    completedMinutes = unit === 'hours' ? Math.round(val * 60) : Math.round(val);
+            }
+            try {
+                const response = await fetch(`${API_URL}/api/todos/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        userId: currentUser.id,
+                        title,
+                        description,
+                        dueDate,
+                        notes,
+                        completedMinutes
+                    })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    closeEditTodoModal();
+                    await loadTodos();
+                } else {
+                    alert(data.error || 'Failed to update to do');
+                }
+            } catch (err) {
+                console.error('Error updating todo:', err);
+                alert('Failed to update to do');
+            }
+        });
+    }
+    // Ensure "Time to complete" block exists (e.g. if modal was created before we added it)
+    let valueInput = document.getElementById('edit-todo-completed-value');
+    let unitSelect = document.getElementById('edit-todo-completed-unit');
+    if (!valueInput || !unitSelect) {
+        const form = document.getElementById('edit-todo-form');
+        const dueGroup = form.querySelector('#edit-todo-due-date')?.closest('.form-group');
+        const wrap = document.createElement('div');
+        wrap.className = 'form-group form-group-highlight todo-time-row';
+        wrap.innerHTML = '<label>Time it took to complete</label><div class="todo-time-input-wrap"><input type="number" id="edit-todo-completed-value" min="0" step="0.5" placeholder="0" class="todo-time-value-input"><select id="edit-todo-completed-unit" class="todo-time-unit-select"><option value="minutes">min</option><option value="hours">hrs</option></select></div>';
+        if (dueGroup && dueGroup.nextElementSibling) form.insertBefore(wrap, dueGroup.nextElementSibling);
+        else form.insertBefore(wrap, form.querySelector('.modal-actions'));
+        valueInput = document.getElementById('edit-todo-completed-value');
+        unitSelect = document.getElementById('edit-todo-completed-unit');
+    }
+    document.getElementById('edit-todo-id').value = todo.id;
+    document.getElementById('edit-todo-title').value = todo.title || '';
+    document.getElementById('edit-todo-description').value = todo.description || '';
+    document.getElementById('edit-todo-due-date').value = todo.dueDate ? String(todo.dueDate).slice(0, 10) : '';
+    document.getElementById('edit-todo-notes').value = todo.notes || '';
+    const totalMins = todo.completedMinutes != null ? Number(todo.completedMinutes) : null;
+    if (valueInput && unitSelect) {
+        if (totalMins != null && totalMins > 0) {
+            if (totalMins >= 60) {
+                unitSelect.value = 'hours';
+                valueInput.value = Math.round(totalMins / 60 * 10) / 10;
+            } else {
+                unitSelect.value = 'minutes';
+                valueInput.value = String(totalMins);
+            }
+        } else {
+            valueInput.value = '';
+            unitSelect.value = 'minutes';
+        }
+    }
+    modal.style.display = 'flex';
+    setTimeout(() => document.getElementById('edit-todo-title').focus(), 100);
+}
+
+function closeEditTodoModal() {
+    const modal = document.getElementById('edit-todo-modal');
     if (modal) modal.style.display = 'none';
 }
 
