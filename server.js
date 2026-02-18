@@ -510,10 +510,22 @@ app.get('/api/todos', async (req, res) => {
     }
     const todos = await db.all(
       db.type === 'postgres'
-        ? 'SELECT id, title, description, completed, sort_order, due_date, completed_minutes, notes, created_at, updated_at FROM todos WHERE user_id = $1 ORDER BY sort_order ASC, created_at ASC'
-        : 'SELECT id, title, description, completed, sort_order, due_date, completed_minutes, notes, created_at, updated_at FROM todos WHERE user_id = ? ORDER BY sort_order ASC, created_at ASC',
+        ? 'SELECT id, title, description, completed, sort_order, due_date, completed_minutes, completed_date, notes, created_at, updated_at FROM todos WHERE user_id = $1 ORDER BY sort_order ASC, created_at ASC'
+        : 'SELECT id, title, description, completed, sort_order, due_date, completed_minutes, completed_date, notes, created_at, updated_at FROM todos WHERE user_id = ? ORDER BY sort_order ASC, created_at ASC',
       [userId]
     );
+    // Backfill: set completed_date to today's date for todos that are completed but missing the date
+    const today = new Date().toISOString().split('T')[0];
+    for (const t of todos) {
+      const isCompleted = db.type === 'postgres' ? t.completed : Boolean(t.completed);
+      if (isCompleted && !t.completed_date) {
+        await db.run(
+          db.type === 'postgres' ? 'UPDATE todos SET completed_date = $1 WHERE id = $2' : 'UPDATE todos SET completed_date = ? WHERE id = ?',
+          [today, t.id]
+        );
+        t.completed_date = today; // Update local copy for response
+      }
+    }
     res.json({ success: true, todos: todos.map(t => ({
       id: t.id,
       title: t.title,
@@ -522,6 +534,7 @@ app.get('/api/todos', async (req, res) => {
       sortOrder: t.sort_order,
       dueDate: t.due_date || null,
       completedMinutes: t.completed_minutes != null ? Number(t.completed_minutes) : null,
+      completedDate: t.completed_date || null,
       notes: t.notes || '',
       createdAt: t.created_at,
       updatedAt: t.updated_at
@@ -561,7 +574,7 @@ app.post('/api/todos', async (req, res) => {
 app.put('/api/todos/:id', async (req, res) => {
   try {
     const todoId = parseInt(req.params.id, 10);
-    const { userId, title, description, completed, dueDate, completedMinutes, notes } = req.body;
+    const { userId, title, description, completed, dueDate, completedMinutes, completedDate, notes } = req.body;
     if (!userId || !todoId) {
       return res.status(400).json({ success: false, error: 'User ID and todo ID required' });
     }
@@ -579,6 +592,20 @@ app.put('/api/todos/:id', async (req, res) => {
     if (completed !== undefined) {
       updates.push(db.type === 'postgres' ? `completed = $${paramIndex++}` : 'completed = ?');
       params.push(db.type === 'postgres' ? completed : (completed ? 1 : 0));
+      // When marking complete, set completed_date to today if not provided
+      if (completed && completedDate === undefined) {
+        const today = new Date().toISOString().split('T')[0];
+        updates.push(db.type === 'postgres' ? `completed_date = $${paramIndex++}` : 'completed_date = ?');
+        params.push(today);
+      } else if (!completed) {
+        // When marking incomplete, clear completed_date
+        updates.push(db.type === 'postgres' ? `completed_date = $${paramIndex++}` : 'completed_date = ?');
+        params.push(null);
+      }
+    }
+    if (completedDate !== undefined) {
+      updates.push(db.type === 'postgres' ? `completed_date = $${paramIndex++}` : 'completed_date = ?');
+      params.push(completedDate || null);
     }
     if (dueDate !== undefined) {
       updates.push(db.type === 'postgres' ? `due_date = $${paramIndex++}` : 'due_date = ?');

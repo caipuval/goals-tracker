@@ -3169,14 +3169,34 @@ body {
     opacity: 0.7;
 }
 
-.todo-time-taken {
+.todo-time-taken,
+.todo-created-date,
+.todo-completed-date,
+.todo-duration {
     font-size: 12px;
+    line-height: 1.4;
     margin-top: 4px;
+    font-weight: 400;
+}
+
+.todo-time-taken {
     color: var(--primary);
 }
 
 .todo-time-taken.todo-time-empty {
     color: var(--text-secondary);
+}
+
+.todo-created-date {
+    color: var(--text-secondary);
+}
+
+.todo-completed-date {
+    color: var(--primary);
+}
+
+.todo-duration {
+    color: var(--accent-light);
 }
 
 .todo-notes {

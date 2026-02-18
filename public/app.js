@@ -4186,6 +4186,8 @@ async function loadTodos() {
             todos = (data.todos || []).map(t => ({
                 ...t,
                 completedMinutes: t.completedMinutes != null ? t.completedMinutes : (t.completed_minutes != null ? t.completed_minutes : null),
+                completedDate: t.completedDate || t.completed_date || null,
+                createdAt: t.createdAt || t.created_at || null,
                 notes: t.notes != null ? t.notes : (t.notes !== undefined ? t.notes : '')
             }));
             renderTodos();
@@ -4217,6 +4219,37 @@ function renderTodos() {
         const mins = todo.completedMinutes != null ? Number(todo.completedMinutes) : null;
         const timeStr = mins != null && mins > 0 ? (mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`) : '-';
         const timeEmpty = timeStr === '-';
+        const completedDateDisplay = todo.completedDate ? (() => {
+            const s = String(todo.completedDate).trim().slice(0, 10);
+            const [y, m, d] = s.split('-').map(Number);
+            return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        })() : null;
+        const createdDateDisplay = todo.createdAt ? (() => {
+            const s = String(todo.createdAt).trim().slice(0, 10);
+            const [y, m, d] = s.split('-').map(Number);
+            return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        })() : null;
+        // Calculate duration: days between created and completed
+        let durationDisplay = null;
+        if (todo.completed && todo.completedDate && todo.createdAt) {
+            try {
+                const created = new Date(todo.createdAt);
+                const completed = new Date(todo.completedDate);
+                if (!isNaN(created.getTime()) && !isNaN(completed.getTime())) {
+                    const diffTime = completed.getTime() - created.getTime();
+                    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+                    if (diffDays === 0) {
+                        durationDisplay = 'Completed same day';
+                    } else if (diffDays === 1) {
+                        durationDisplay = '1 day';
+                    } else {
+                        durationDisplay = `${diffDays} days`;
+                    }
+                }
+            } catch (e) {
+                // Ignore date parsing errors
+            }
+        }
         const notes = (todo.notes || '').trim();
         return `
         <div class="todo-item" data-todo-id="${todo.id}" draggable="true">
@@ -4228,14 +4261,17 @@ function renderTodos() {
                     <div class="todo-title ${todo.completed ? 'completed' : ''}">${escapeHtml(todo.title)}</div>
                     ${dueDateDisplay ? `<div class="todo-due-date">${dueDateDisplay}</div>` : ''}
                 </div>
+                ${createdDateDisplay ? `<div class="todo-created-date">Created: ${createdDateDisplay}</div>` : ''}
                 <div class="todo-time-taken ${timeEmpty ? 'todo-time-empty' : ''}">Time: ${timeStr}</div>
+                ${completedDateDisplay ? `<div class="todo-completed-date">Completed: ${completedDateDisplay}</div>` : ''}
+                ${durationDisplay ? `<div class="todo-duration">Duration: ${durationDisplay}</div>` : ''}
                 ${todo.description ? `<div class="todo-description ${todo.completed ? 'completed' : ''}">${escapeHtml(todo.description)}</div>` : ''}
                 ${notes ? `<div class="todo-notes">${escapeHtml(notes)}</div>` : ''}
             </div>
             <button class="todo-edit" data-todo-id="${todo.id}" aria-label="Edit to do">✎</button>
             <button class="todo-delete" data-todo-id="${todo.id}" aria-label="Delete to do">×</button>
         </div>
-    `;
+        `;
     }).join('');
     
     // Attach event listeners

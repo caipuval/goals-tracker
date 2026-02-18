@@ -204,6 +204,7 @@ if (dbType === 'postgres') {
           sort_order INTEGER DEFAULT 0,
           due_date DATE,
           completed_minutes INTEGER,
+          completed_date DATE,
           notes TEXT,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -215,6 +216,9 @@ if (dbType === 'postgres') {
       } catch (_) {}
       try {
         await db.run('ALTER TABLE todos ADD COLUMN notes TEXT');
+      } catch (_) {}
+      try {
+        await db.run('ALTER TABLE todos ADD COLUMN completed_date DATE');
       } catch (_) {}
 
       // Backup tables for deleted records
@@ -493,6 +497,7 @@ if (dbType === 'postgres') {
           sort_order INTEGER DEFAULT 0,
           due_date DATE,
           completed_minutes INTEGER,
+          completed_date DATE,
           notes TEXT,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -504,6 +509,9 @@ if (dbType === 'postgres') {
       } catch (_) {}
       try {
         await db.run('ALTER TABLE todos ADD COLUMN notes TEXT');
+      } catch (_) {}
+      try {
+        await db.run('ALTER TABLE todos ADD COLUMN completed_date DATE');
       } catch (_) {}
 
       // Backup tables for deleted records
